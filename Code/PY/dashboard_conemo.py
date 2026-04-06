@@ -187,6 +187,16 @@ page = st.sidebar.radio(
 )
 
 # ---------------------------------------------------------------------------
+# P2 — Label discreto de versão MVP
+#
+# Exibido no rodapé da sidebar como caption (texto pequeno e mudo do
+# Streamlit). Não interfere na navegação, no timestamp nem no botão 🔄.
+# Indica ao usuário que o dashboard está em versão MVP operacional.
+# ---------------------------------------------------------------------------
+st.sidebar.markdown("---")
+st.sidebar.caption("Dashboard CONEMO — Versão MVP")
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 def phq_severity(score):
