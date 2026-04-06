@@ -47,29 +47,31 @@ Qualquer inclusão de conteúdo que não respeite essas restrições deve ser tr
 - BigQuery e alertas não integram o núcleo obrigatório do MVP visual imediato;
 - backend, metadados de coleta, dupla timeline analítica, alertas e segregação de PII são requisitos de retaguarda, não do MVP visual.
 
-### GitHub institucional
+### Repositório institucional
 
 - a organização `conemo-project` foi criada e aprovada;
 - o repositório `conemo` foi criado como privado e aprovado;
-- esta configuração inicial é a primeira fase controlada de versionamento;
+- a fase de configuração inicial foi executada, auditada e formalmente aprovada em 2026-04-06;
 - nenhum dado real, credencial ou cópia massiva do projeto local foi realizada.
 
 ---
 
-## 4. Estrutura prevista (a ser implementada em fases)
+## 4. Estrutura prevista para fases posteriores
+
+A estrutura abaixo descreve a organização-alvo do repositório, a ser implementada em fases aprovadas formalmente pela coordenação. Nenhum diretório ou arquivo além dos já presentes (`README.md` e `.gitignore`) foi criado nesta fase.
 
 ```
 conemo/
 ├── .gitignore          # proteção contra versionamento indevido
 ├── README.md           # este documento
 ├── Code/
-│   ├── PY/             # scripts Python auditados
-│   └── R/              # scripts R auditados
-└── Docs/               # documentação normativa e técnica auditada
+│   ├── PY/             # scripts Python auditados e aprovados
+│   └── R/              # scripts R auditados e aprovados
+└── Docs/               # documentação normativa e técnica auditada e aprovada
 ```
 
-A integração de conteúdo do projeto local seguirá fases aprovadas formalmente pela coordenação.  
-Nenhum diretório de dados (`Data/`) será versionado sem anonimização e revisão formal.
+**A integração de qualquer conteúdo do projeto local seguirá, obrigatoriamente, fases aprovadas formalmente pela coordenação, com revisão de governança prévia.**  
+Nenhum diretório de dados (`Data/`) será versionado sem anonimização, segregação de PII e decisão formal registrada.
 
 ---
 
@@ -78,7 +80,7 @@ Nenhum diretório de dados (`Data/`) será versionado sem anonimização e revis
 A execução técnica deste repositório segue os princípios definidos em:
 
 - `Docs/RULES.md` — princípios de reprodutibilidade, acurácia e auditabilidade;
-- `Docs/Workflow-Projeto.md` — protocolo operacional por papel (coordenador, executor, revisor).
+- `Docs/Workflow-Projeto.md` — protocolo operacional por papel (coordenador, executor técnico, revisor).
 
 **O professor/coordenador é a autoridade final sobre escopo, aprovação e prioridade.**
 
@@ -98,5 +100,5 @@ Os dados do CONEMO são sensíveis por natureza (dados clínicos, identificadore
 
 ---
 
-*Repositório configurado em: 2026-04-06*  
-*Próxima atualização: mediante autorização formal da próxima fase*
+*Versão inicial: 2026-04-06*  
+*Atualizado em: 2026-04-06 — revisão pós-auditoria da Fase de Configuração Inicial*

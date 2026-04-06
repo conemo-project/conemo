@@ -135,8 +135,15 @@ config_local.*
 
 # ---------------------------------------------------------------------------
 # Diretórios de dados do projeto (nunca versionar diretamente)
+# Cobertura granular: diretório-pai e todos os subdiretórios de dados reais.
 # ---------------------------------------------------------------------------
+Data/
 Data/CSV/
 Data/PARQUET/
 Data/raw/
 Data/exports/
+Data/interim/
+Data/processed/
+data/
+data/**
+*/data/
