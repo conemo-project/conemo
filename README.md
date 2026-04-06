@@ -4,7 +4,7 @@
 **Repositório:** `conemo-project/conemo`  
 **Visibilidade:** Privado  
 **Versão inicial:** 2026-04-06  
-**Responsável:** Ricardo Ceneviva
+**Responsáveis:** Ricardo Ceneviva & Anderson Borba
 
 ---
 
