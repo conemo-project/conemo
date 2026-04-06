@@ -110,10 +110,39 @@ def load_data() -> pd.DataFrame:
     extracted = df["json_data_user"].apply(parse_user)
     df = pd.concat([df, extracted], axis=1)
 
-    # Normaliza caixa e remove dados de teste
+    # Normaliza caixa em ubs_name (maiúsculas — padrão estabelecido em P0)
     df["ubs_name"] = df["ubs_name"].str.upper().str.strip()
-    df["ubs_city"] = df["ubs_city"].str.strip()
-    df = df[~df["ubs_city"].isin(["Fake City", "N/A"])]
+
+    # ---------------------------------------------------------------------------
+    # P1.2 — Normalização de caixa em ubs_city
+    #
+    # Regra adotada: strip → Title Case.
+    # Unifica variantes equivalentes por diferença de caixa ou espaços excedentes,
+    # como "são paulo", "SÃO PAULO" e "São Paulo", que passam a ser representadas
+    # uniformemente como "São Paulo".
+    # ubs_name permanece em maiúsculas (padrão P0), preservando a coerência entre
+    # os dois filtros: cidade pré-filtra UBS, UBS permanece como pivô operacional.
+    # ---------------------------------------------------------------------------
+    df["ubs_city"] = df["ubs_city"].str.strip().str.title()
+
+    # ---------------------------------------------------------------------------
+    # P1.1 — Remoção de cidades inválidas ou vazias
+    #
+    # Remove linhas em que ubs_city é:
+    #   - NaN ou None (dado ausente na fonte)
+    #   - string vazia após strip (whitespace-only na fonte)
+    #   - placeholder de dado ausente: "N/A"
+    #   - dado de teste: "Fake City"
+    #
+    # Esses valores apareciam como opção em branco ou inválida no multiselect.
+    # A condição é explícita e auditável; não mascara outros problemas de dados:
+    # se uma cidade legítima ficasse fora do dashboard, seria identificável aqui.
+    # ---------------------------------------------------------------------------
+    _CIDADES_INVALIDAS = {"Fake City", "N/A", ""}
+    df = df[
+        df["ubs_city"].notna()
+        & (~df["ubs_city"].isin(_CIDADES_INVALIDAS))
+    ]
 
     return df
 
