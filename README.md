@@ -1,104 +1,170 @@
-# CONEMO — Repositório Institucional
+# Projeto CONEMO — Repositório Técnico-Documental
 
-**Organização:** [conemo-project](https://github.com/conemo-project)  
-**Repositório:** `conemo-project/conemo`  
-**Visibilidade:** Privado  
-**Versão inicial:** 2026-04-06  
-**Responsáveis:** Ricardo Ceneviva & Anderson Borba
+Este repositório concentra artefatos técnicos, analíticos e documentais do projeto CONEMO, com foco em governança, trilha de auditoria e evolução controlada da frente de dashboard SGBD.
 
 ---
 
-## 1. Finalidade deste repositório
+## 1. Objetivo deste repositório
 
-Este repositório concentra a base técnica e documental do projeto CONEMO, sob governança institucional.
+Hoje, este repositório existe para:
 
-Sua finalidade é:
+- registrar decisões técnicas e de governança do projeto;
+- manter documentação normativa e canônica para execução por fases;
+- armazenar código e insumos da frente de dashboard;
+- preservar evidências auditáveis de validação, reconciliação e planejamento.
 
-- versionar código, documentação normativa e artefatos técnicos auditáveis do projeto;
-- manter trilha rastreável de decisões técnicas, de escopo e de governança;
-- oferecer base segura para colaboração controlada entre membros autorizados;
-- preparar o projeto para fases de integração progressiva e controlada de código e documentação.
+Tipos de artefato concentrados:
 
----
-
-## 2. Restrições obrigatórias de uso
-
-> **Este repositório é privado. Acesso restrito a membros autorizados pela coordenação.**
-
-**O que NÃO deve ser versionado aqui:**
-
-- dados clínicos, epidemiológicos ou operacionais do projeto (brutos ou processados);
-- arquivos `.csv`, `.parquet`, `.xlsx`, `.sav`, `.dta` ou qualquer export de dados reais;
-- credenciais, tokens, chaves, arquivos `.env`, arquivos `*credentials*.json`;
-- caminhos locais de máquina ou segredos de infraestrutura;
-- dumps, exports temporários ou caches de execução local.
-
-Qualquer inclusão de conteúdo que não respeite essas restrições deve ser tratada como incidente de governança.
+- documentação normativa e de workflow;
+- planos e relatórios por fase/passo;
+- scripts em Python e R para exploração, integração e dashboard;
+- dados locais de trabalho (CSV/PARQUET) para execução cache-only;
+- materiais de referência.
 
 ---
 
-## 3. Estado atual do projeto (2026-04-06)
+## 2. Estrutura atual do repositório
 
-### Dashboard
+A estrutura abaixo descreve o estado atual, sem implicar reorganização já executada:
 
-- o dashboard sobe localmente em modo cache/local;
-- o MVP visual está centrado no eixo **agregado-operacional com foco em UBS e gestão**;
-- a visão individual por participante não é o eixo principal do MVP visual atual — é requisito de backend/modelagem para fase posterior;
-- BigQuery e alertas não integram o núcleo obrigatório do MVP visual imediato;
-- backend, metadados de coleta, dupla timeline analítica, alertas e segregação de PII são requisitos de retaguarda, não do MVP visual.
+- `Code/`
+  - `PY/`: scripts Python (inclui `dashboard_conemo.py` e scripts auxiliares)
+  - `R/`: scripts e JSONs auxiliares da frente R
+  - `Quarto/`: artefatos de exploração/visualização e arquivos de dados de apoio
+- `Data/`
+  - `CSV/`: bases em CSV
+  - `PARQUET/`: cache e variantes em parquet usadas na execução local
+- `Docs/`
+  - documentos normativos, planos, auditorias, reconciliações e deliberação
+- `Literature/`
+  - materiais de literatura/referência
+- arquivos de diagrama na raiz (`diagrama_banco_conemo.*`)
 
-### Repositório institucional
-
-- a organização `conemo-project` foi criada e aprovada;
-- o repositório `conemo` foi criado como privado e aprovado;
-- a fase de configuração inicial foi executada, auditada e formalmente aprovada em 2026-04-06;
-- nenhum dado real, credencial ou cópia massiva do projeto local foi realizada.
-
----
-
-## 4. Estrutura prevista para fases posteriores
-
-A estrutura abaixo descreve a organização-alvo do repositório, a ser implementada em fases aprovadas formalmente pela coordenação. Nenhum diretório ou arquivo além dos já presentes (`README.md` e `.gitignore`) foi criado nesta fase.
-
-```
-conemo/
-├── .gitignore          # proteção contra versionamento indevido
-├── README.md           # este documento
-├── Code/
-│   ├── PY/             # scripts Python auditados e aprovados
-│   └── R/              # scripts R auditados e aprovados
-└── Docs/               # documentação normativa e técnica auditada e aprovada
-```
-
-**A integração de qualquer conteúdo do projeto local seguirá, obrigatoriamente, fases aprovadas formalmente pela coordenação, com revisão de governança prévia.**  
-Nenhum diretório de dados (`Data/`) será versionado sem anonimização, segregação de PII e decisão formal registrada.
+A estrutura está estável/congelada para as frentes em curso, salvo deliberação formal em fase própria.
 
 ---
 
-## 5. Governança
+## 3. Documentos normativos principais
 
-A execução técnica deste repositório segue os princípios definidos em:
+Leitura obrigatória para qualquer execução:
 
-- `Docs/RULES.md` — princípios de reprodutibilidade, acurácia e auditabilidade;
-- `Docs/Workflow-Projeto.md` — protocolo operacional por papel (coordenador, executor técnico, revisor).
+1. [Docs/RULES.md](Docs/RULES.md)
+2. [Docs/Workflow-Projeto.md](Docs/Workflow-Projeto.md)
+3. [Docs/Plano-implementacao-dashboard.md](Docs/Plano-implementacao-dashboard.md)
 
-**O professor/coordenador é a autoridade final sobre escopo, aprovação e prioridade.**
+Documentos de estado recente do dashboard:
 
-Avanços para novas fases dependem de autorização formal prevista no workflow.
+4. [Docs/passo2-mapa-dependencias-cache-vs-bigquery.md](Docs/passo2-mapa-dependencias-cache-vs-bigquery.md)
+5. [Docs/passo3-definicao-mvp-e-backlog.md](Docs/passo3-definicao-mvp-e-backlog.md)
+6. [Docs/passo4-reconciliacao-mvp-visual.md](Docs/passo4-reconciliacao-mvp-visual.md)
 
----
+Documento de estado recente do setup institucional GitHub:
 
-## 6. Dados sensíveis
-
-Os dados do CONEMO são sensíveis por natureza (dados clínicos, identificadores de participantes, registros de saúde mental).
-
-- **Dados reais não devem ser versionados aqui sob nenhuma circunstância.**
-- Qualquer futura inclusão de dados — mesmo anonimizados — depende de:
-  - anonimização formal documentada;
-  - segregação de PII validada;
-  - decisão explícita e registrada da coordenação.
+7. [Docs/github-setup-fase-organizacao-repositorio.md](Docs/github-setup-fase-organizacao-repositorio.md)
 
 ---
 
-*Versão inicial: 2026-04-06*  
-*Atualizado em: 2026-04-06 — revisão pós-auditoria da Fase de Configuração Inicial*
+## 4. Estado atual do projeto
+
+Resumo factual do estado documentado:
+
+- trilha de governança e auditoria foi conduzida em múltiplas fases documentais em `Docs/`;
+- Passo 2 (dependências cache vs BigQuery) está documentado como completo;
+- Passo 3 (definição de MVP e backlog) está documentado como completo;
+- Passo 4 (reconciliação do MVP visual) está documentado como aprovado e encerrado após complemento corretivo vinculante em [Docs/passo4-reconciliacao-mvp-visual.md](Docs/passo4-reconciliacao-mvp-visual.md);
+- Fase 5 (frente documental de deliberação) está aprovada e encerrada como fase documental; seus efeitos operacionais permanecem condicionados à deliberação formal da Coordenação.
+- a frente de setup institucional GitHub está documentada e aprovada em [Docs/github-setup-fase-organizacao-repositorio.md](Docs/github-setup-fase-organizacao-repositorio.md), com a organização `conemo-project` e o repositório privado `conemo` criados com sucesso;
+- a fase de configuração inicial do repositório `conemo-project/conemo` foi executada, auditada e formalmente aprovada em 2026-04-06: `.gitignore` robusto e `README.md` institucional criados; repositório privado, limpo e apto para fases posteriores;
+- a **Fase A** (configuração avançada mínima do GitHub) está **formalmente encerrada** como aprovada com ressalvas (auditoria final: 2026-04-06); documentada em [Docs/fase-github-configuracao-avancada.md](Docs/fase-github-configuracao-avancada.md); o projeto está **autorizado a avançar para a Fase B**.
+- a **Fase B** (revisão final documental do plano canônico do dashboard) está **formalmente encerrada** em 2026-04-06: [Docs/Plano-implementacao-dashboard.md](Docs/Plano-implementacao-dashboard.md) consolidado como versão final canônica (V.2.0.0); decisão sobre botão `🔄`, requisito de `timestamp` e separação entre MVP visual / backend-modelagem / fase posterior incorporados; projeto pronto para abertura da Fase C.
+- a **Fase C** (melhorias do dashboard) está **formalmente aberta** em 2026-04-06 para preparação executiva, registrada em [Docs/fase-c-abertura-melhorias-dashboard-conemo.md](Docs/fase-c-abertura-melhorias-dashboard-conemo.md), sem implementação técnica iniciada neste registro.
+
+Importante:
+
+- propostas e roadmap não devem ser interpretados como cronograma autorizado automático;
+- avanços para novas fases dependem de aprovação formal prevista no workflow.
+
+---
+
+## 5. Estado atual da frente do dashboard
+
+Consolidado fiel aos artefatos vigentes:
+
+- o dashboard sobe localmente;
+- a operação atual do MVP visual está em modo cache/local;
+- integração BigQuery não é parte do escopo visual obrigatório do MVP atual;
+- o botão `🔄` permanece preservado no dashboard; sua operação está temporariamente condicionada à credencial Google/BigQuery; a dependência não constitui exclusão funcional;
+- no longo prazo, o botão `🔄` permanece componente formal da arquitetura de atualização via BigQuery;
+- o eixo do MVP visual foi recentrado para **agregado-operacional com foco em UBS e gestão**;
+- a visão individual por participante permanece requisito estrutural de backend/modelagem, mas não é eixo principal da interface visual atual;
+- o `timestamp` da última atualização do cache é **requisito obrigatório** da próxima fase técnica.
+
+Referência canônica para esse enquadramento: [Docs/Plano-implementacao-dashboard.md](Docs/Plano-implementacao-dashboard.md) (versão final canônica V.2.0.0, Fase B) e reconciliação formal em [Docs/passo4-reconciliacao-mvp-visual.md](Docs/passo4-reconciliacao-mvp-visual.md).
+
+---
+
+## 6. Histórico recente de trabalho (síntese factual)
+
+- **Passo 1**: teste funcional do dashboard (referenciado nos passos seguintes)
+- **Passo 2**: mapeamento de dependências cache vs BigQuery
+- **Passo 3**: definição de MVP e backlog priorizado
+- **Passo 4**: reconciliação do dashboard atual com o MVP visual revisado
+- **Setup GitHub institucional**: organização `conemo-project` e repositório privado `conemo` criados e aprovados
+- **Configuração inicial do repositório `conemo`**: `.gitignore` robusto e `README.md` institucional criados, commit inicial enviado, fase formalmente aprovada em auditoria (2026-04-06); ressalvas menores tratadas no mesmo ciclo
+- **Fase A — Configuração avançada mínima do GitHub**: política mínima de contribuição definida, bloqueio HTTP 403 registrado sem improvisação, auditoria de ajustes aprovada em 2026-04-06 — **fase formalmente encerrada; clearance para Fase B concedido**
+- **Fase B — Revisão final documental do plano canônico**: [Docs/Plano-implementacao-dashboard.md](Docs/Plano-implementacao-dashboard.md) consolidado como V.2.0.0 (versão final canônica), **formalmente encerrado** em auditoria; decisão sobre botão `🔄`, navegação UBS-first e `timestamp` incorporados; projeto pronto para abertura da Fase C
+- **Fase C — Abertura da fase de melhorias do dashboard**: kickoff documental registrado em [Docs/fase-c-abertura-melhorias-dashboard-conemo.md](Docs/fase-c-abertura-melhorias-dashboard-conemo.md); base executiva mantida no plano canônico + complemento do Passo 4; sem início de implementação neste ato
+
+Observação: esta lista é histórico de execução/documentação, não cronograma automático de próximas fases.
+
+---
+
+## 7. Pendências e próximos pontos de atenção
+
+Itens que permanecem em fase própria ou dependência formal:
+
+- execução técnica da próxima fase do dashboard com base no escopo reconciliado do Passo 4;
+- itens dependentes de BigQuery/credencial e decisões de arquitetura/deploy;
+- deliberações formais da coordenação para itens de governança documental da Fase 5;
+- decisão institucional sobre viabilização de proteção técnica da `main` (branch protection/rulesets) no GitHub privado, dado bloqueio atual de plano/permissão (HTTP 403) — registrada como **pendência residual de governança técnica** (Fase A encerrada);
+- decisão sobre redundância de owner da organização `conemo-project` (risco de owner único) — registrada como **pendência residual de governança técnica** (Fase A encerrada);
+- componentes explicitamente adiados no plano do MVP visual (ex.: visão individual como eixo principal da interface, alertas detalhados em camada visual, timelines explícitas por participante na interface).
+
+---
+
+## 8. Como retomar o projeto sem perda de contexto
+
+Ordem recomendada de leitura para retomada:
+
+1. [Docs/RULES.md](Docs/RULES.md)
+2. [Docs/Workflow-Projeto.md](Docs/Workflow-Projeto.md)
+3. [Docs/Plano-implementacao-dashboard.md](Docs/Plano-implementacao-dashboard.md)
+4. [Docs/passo2-mapa-dependencias-cache-vs-bigquery.md](Docs/passo2-mapa-dependencias-cache-vs-bigquery.md)
+5. [Docs/passo3-definicao-mvp-e-backlog.md](Docs/passo3-definicao-mvp-e-backlog.md)
+6. [Docs/passo4-reconciliacao-mvp-visual.md](Docs/passo4-reconciliacao-mvp-visual.md)
+7. [Docs/github-setup-fase-organizacao-repositorio.md](Docs/github-setup-fase-organizacao-repositorio.md)
+8. [Docs/fase-github-configuracao-avancada.md](Docs/fase-github-configuracao-avancada.md)
+9. [Docs/fase-c-abertura-melhorias-dashboard-conemo.md](Docs/fase-c-abertura-melhorias-dashboard-conemo.md)
+
+Documento canônico atual para escopo visual do MVP do dashboard:
+
+- [Docs/Plano-implementacao-dashboard.md](Docs/Plano-implementacao-dashboard.md)
+
+Documento vinculante de reconciliação do Passo 4:
+
+- [Docs/passo4-reconciliacao-mvp-visual.md](Docs/passo4-reconciliacao-mvp-visual.md)
+
+READMEs complementares de navegação:
+
+- [Docs/README.md](Docs/README.md)
+- [Code/README.md](Code/README.md)
+- [Data/README.md](Data/README.md)
+
+---
+
+## 9. Regras de uso e atualização deste README
+
+- Atualizar este README sempre que fases/passo relevantes forem concluídos e formalmente registrados.
+- Manter aderência estrita aos documentos canônicos em `Docs/`.
+- Não sobrescrever decisões aprovadas sem registro formal de auditoria/reconciliação.
+- Não converter proposta em decisão final sem documento de aprovação correspondente.
