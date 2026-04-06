@@ -1,8 +1,8 @@
 # Fase C1 — Minuta executiva para o Agente Executor (abertura formal registrada no clone oficial)
 
 **Data de registro:** 2026-04-06  
-**Última atualização:** 2026-04-06 — Etapa 2 concluída (P0 implementado, commit `5ce299d`)  
-**Status:** Etapa 2 executada — P0 implementado; P1/P2 pendentes de autorização  
+**Última atualização:** 2026-04-06 — Etapa 3 concluída (P1 implementado, commit `86fc1e2`)  
+**Status:** Etapa 3 executada — P1 implementado; P2 pendente de autorização  
 **Modo principal:** Tipo F — dashboard, relatórios e exportação  
 **Sequência secundária:** Tipo G — auditoria e reconciliação; Tipo H — documentação e handoff  
 **Branch da fase:** `feat/dashboard-fase-c1-mvp-operacional`  
@@ -54,6 +54,74 @@
 | P0.2 — Nav. UBS/gestão | ✅ Implementado |
 | P0.3 — Botão 🔄 | ✅ Implementado |
 | P1 — Filtro cidade | ⬜ Pendente de autorização |
+| P2 — Label versão MVP | ⬜ Pendente de autorização |
+| Push para remoto | ⬜ Pendente |
+| PR | ⬜ Pendente |
+
+## Registro de execução — Etapa 3: P1
+
+**Commit técnico:** `86fc1e2`  
+**Mensagem:** `fix: corrige filtro de cidade e normaliza duplicidades`  
+**Arquivo editado:** `Code/PY/dashboard_conemo.py`  
+**Localização da mudança:** função `load_data()`, bloco de normalização e filtragem de `ubs_city`  
+**Validação pré-commit:** `ast.parse()` confirmou sintaxe Python válida; `git diff` confirmou alteração cirúrgica (somente o bloco de normalização)
+
+### P1.1 — Cidade vazia no filtro
+
+**Problema identificado:** o código anterior filtrava apenas `"Fake City"` e `"N/A"`, mas não tratava:
+- strings vazias `""` resultantes de `str.strip()` sobre valores whitespace-only na fonte;
+- valores `NaN`/`None` (o `dropna()` no filtro UI era a única defesa, insuficiente para garantia na fonte).
+
+**Correção implementada:** substituição do filtro simples por condição composta e explícita:
+```python
+_CIDADES_INVALIDAS = {"Fake City", "N/A", ""}
+df = df[
+    df["ubs_city"].notna()
+    & (~df["ubs_city"].isin(_CIDADES_INVALIDAS))
+]
+```
+Nenhuma cidade legítima é afetada: a condição é auditável e qualquer exclusão inesperada seria identificável na constante `_CIDADES_INVALIDAS`.
+
+### P1.2 — Normalização de duplicidade por caixa
+
+**Problema identificado:** `ubs_city` recebia apenas `str.strip()`, sem normalização de caixa. Variantes como `"são paulo"`, `"SÃO PAULO"` e `"São Paulo"` apareciam como três entradas distintas no multiselect.
+
+**Regra adotada: strip → Title Case.**
+```python
+df["ubs_city"] = df["ubs_city"].str.strip().str.title()
+```
+- Simples, legível e consistente com nomes de cidades em português.
+- `ubs_name` permanece em maiúsculas (padrão P0), preservando a coerência entre os dois filtros.
+
+### P1.3 — UBS como pivô principal (verificação)
+
+A arquitetura de filtro em cascata não foi alterada: cidade pré-filtra o conjunto de UBS, e UBS é o pivô operacional do dashboard. A correção de P1 não transformou cidade em eixo principal.
+
+### Verificações realizadas
+
+| Critério | Verificação |
+|---|---|
+| Cidade vazia no filtro | Removida via `notna()` + `isin(_CIDADES_INVALIDAS)` que inclui `""` |
+| Duplicidades por caixa | Eliminadas via `.str.title()` aplicado em `load_data()` |
+| Normalização legível | Regra `strip → Title Case` documentada no código com comentário |
+| UBS como pivô | Cascata cidade → UBS preservada; `ubs_name` em maiúsculas intocado |
+| P0 preservado — timestamp | `get_cache_timestamp()` e exibição na sidebar não foram alterados |
+| P0 preservado — navegação | `st.sidebar.radio(["📊 Estatísticas por UBS"])` não foi alterado |
+| P0 preservado — botão 🔄 | `st.sidebar.button("🔄 Atualizar dados")` não foi alterado |
+| P2 não iniciado | Confirmado: nenhuma alteração fora do escopo de P1 |
+| Sintaxe Python | `ast.parse()` retornou OK antes do commit |
+| Diff cirúrgico | `git diff` confirmou: somente bloco de normalização modificado |
+
+### Status após Etapa 3
+
+| Item | Status |
+|------|--------|
+| P0.1 — Timestamp cache | ✅ Implementado (`5ce299d`) |
+| P0.2 — Nav. UBS/gestão | ✅ Implementado (`5ce299d`) |
+| P0.3 — Botão 🔄 | ✅ Implementado (`5ce299d`) |
+| P1.1 — Filtro cidade vazia | ✅ Implementado (`86fc1e2`) |
+| P1.2 — Normalização de caixa | ✅ Implementado (`86fc1e2`) |
+| P1.3 — UBS como pivô | ✅ Verificado (arquitetura preservada) |
 | P2 — Label versão MVP | ⬜ Pendente de autorização |
 | Push para remoto | ⬜ Pendente |
 | PR | ⬜ Pendente |
