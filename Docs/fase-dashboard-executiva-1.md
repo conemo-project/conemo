@@ -1,8 +1,8 @@
 # Fase C1 — Minuta executiva para o Agente Executor (abertura formal registrada no clone oficial)
 
 **Data de registro:** 2026-04-06  
-**Última atualização:** 2026-04-06 — Etapa 3 concluída (P1 implementado, commit `86fc1e2`)  
-**Status:** Etapa 3 executada — P1 implementado; P2 pendente de autorização  
+**Última atualização:** 2026-04-06 — Etapa 4 concluída (P2 implementado, commit `1009fda`)  
+**Status:** Etapa 4 executada — P0/P1/P2 implementados; aguardando autorização para handoff/PR  
 **Modo principal:** Tipo F — dashboard, relatórios e exportação  
 **Sequência secundária:** Tipo G — auditoria e reconciliação; Tipo H — documentação e handoff  
 **Branch da fase:** `feat/dashboard-fase-c1-mvp-operacional`  
@@ -122,7 +122,60 @@ A arquitetura de filtro em cascata não foi alterada: cidade pré-filtra o conju
 | P1.1 — Filtro cidade vazia | ✅ Implementado (`86fc1e2`) |
 | P1.2 — Normalização de caixa | ✅ Implementado (`86fc1e2`) |
 | P1.3 — UBS como pivô | ✅ Verificado (arquitetura preservada) |
-| P2 — Label versão MVP | ⬜ Pendente de autorização |
+| P2 — Label versão MVP | ✅ Implementado (`1009fda`) |
+| Push para remoto | ⬜ Pendente |
+| PR | ⬜ Pendente |
+
+## Registro de execução — Etapa 4: P2
+
+**Commit técnico:** `1009fda`  
+**Mensagem:** `feat: adiciona label discreto de versao MVP`  
+**Arquivo editado:** `Code/PY/dashboard_conemo.py`  
+**Localização da mudança:** bloco da sidebar, após `st.sidebar.radio` (navegação P0.2) e antes dos `Helpers`  
+**Validação pré-commit:** `ast.parse()` confirmou sintaxe Python válida; `git diff` confirmou adição cirúrgica (10 linhas, 0 remoções)
+
+### P2 — Label discreto de versão MVP
+
+**Implementação adotada:**
+```python
+st.sidebar.markdown("---")
+st.sidebar.caption("Dashboard CONEMO — Versão MVP")
+```
+
+**Justificativa da escolha:**
+- `st.sidebar.caption()` renderiza texto em fonte pequena e cor muda (estilo Streamlit nativo de texto secundário) — o elemento menos intrusivo disponível;
+- posicionado no rodapé da sidebar, após navegação e botão, em área secundária da interface;
+- não altera nenhum elemento da área principal (página de UBS), nem da lógica de dados;
+- nenhuma nova funcionalidade introduzida.
+
+### Verificações realizadas
+
+| Critério | Verificação |
+|---|---|
+| Label MVP visível | `st.sidebar.caption()` sempre visível na sidebar |
+| Label discreto | `caption()` = menor tipografia disponível no Streamlit; área secundária |
+| Não interfere na navegação | Inserido *após* o `radio`; `page` não foi alterado |
+| P0 — timestamp | `get_cache_timestamp()` e exibição na sidebar não aparecem no diff |
+| P0 — navegação UBS | `st.sidebar.radio(["📊 Estatísticas por UBS"])` não foi alterado |
+| P0 — botão 🔄 | `st.sidebar.button("🔄 Atualizar dados")` não foi alterado |
+| P1 — cidade vazia | `notna()` + `_CIDADES_INVALIDAS` em `load_data()` não foram alterados |
+| P1 — normalização | `.str.title()` em `ubs_city` não foi alterado |
+| P1 — UBS como pivô | Cascata de filtros não foi alterada |
+| Sintaxe Python | `ast.parse()` retornou OK |
+| Diff cirúrgico | `git diff`: 10 linhas adicionadas, 0 removidas, 1 bloco |
+| Nenhuma ampliação de escopo | Somente label textual estático; sem nova lógica |
+
+### Status após Etapa 4
+
+| Item | Status |
+|------|--------|
+| P0.1 — Timestamp cache | ✅ Implementado (`5ce299d`) |
+| P0.2 — Nav. UBS/gestão | ✅ Implementado (`5ce299d`) |
+| P0.3 — Botão 🔄 | ✅ Implementado (`5ce299d`) |
+| P1.1 — Filtro cidade vazia | ✅ Implementado (`86fc1e2`) |
+| P1.2 — Normalização de caixa | ✅ Implementado (`86fc1e2`) |
+| P1.3 — UBS como pivô | ✅ Verificado (arquitetura preservada) |
+| P2 — Label versão MVP | ✅ Implementado (`1009fda`) |
 | Push para remoto | ⬜ Pendente |
 | PR | ⬜ Pendente |
 
