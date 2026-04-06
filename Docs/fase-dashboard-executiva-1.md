@@ -1,8 +1,8 @@
 # Fase C1 — Minuta executiva para o Agente Executor (abertura formal registrada no clone oficial)
 
 **Data de registro:** 2026-04-06  
-**Última atualização:** 2026-04-06 — Etapa 4 concluída (P2 implementado, commit `1009fda`)  
-**Status:** Etapa 4 executada — P0/P1/P2 implementados; aguardando autorização para handoff/PR  
+**Última atualização:** 2026-04-06 — Fase C1 fechada formalmente; PR aberto para revisão  
+**Status:** ✅ Fase C1 concluída — P0/P1/P2 implementados, branch publicada, PR aberto; aguardando merge  
 **Modo principal:** Tipo F — dashboard, relatórios e exportação  
 **Sequência secundária:** Tipo G — auditoria e reconciliação; Tipo H — documentação e handoff  
 **Branch da fase:** `feat/dashboard-fase-c1-mvp-operacional`  
@@ -511,3 +511,68 @@ Ao final, o executor deve entregar um relatório curto com:
 - Bloqueio técnico encontrado: pasta de trabalho atual sem diretório `.git` (erro: `fatal: not a git repository (or any of the parent directories): .git`), impedindo `git checkout main`, criação de branch e commit local.
 - Nenhuma implementação funcional foi iniciada em `Code/PY/dashboard_conemo.py`.
 - Próxima ação: assim que o repositório Git local estiver disponível nesta pasta, repetir apenas a Etapa 1 (`main` atualizado + branch `feat/dashboard-fase-c1-mvp-operacional` + commit `docs: abre fase executiva C1 do dashboard`).
+
+---
+
+## Consolidação final da Fase C1 — 2026-04-06
+
+### Fechamento formal
+
+A Fase C1 do dashboard CONEMO foi concluída integralmente. Todas as entregas de P0, P1 e P2 foram implementadas, validadas e commitadas na branch `feat/dashboard-fase-c1-mvp-operacional`. A branch foi publicada em `origin` e o Pull Request foi aberto para revisão humana.
+
+### Arquivo técnico principal modificado
+
+| Arquivo | Motivo |
+|---|---|
+| `Code/PY/dashboard_conemo.py` | P0 + P1 + P2 — único arquivo técnico autorizado na fase |
+| `Docs/fase-dashboard-executiva-1.md` | Registro vivo de execução da fase |
+
+### Commits da fase (em ordem cronológica)
+
+| Hash | Tipo | Descrição |
+|---|---|---|
+| `eefcbf2` | `docs` | Abre fase executiva C1 do dashboard |
+| `5ce299d` | `feat` | P0: timestamp, navegação UBS, botão 🔄 |
+| `497a8e3` | `docs` | Registra execução de P0 |
+| `86fc1e2` | `fix` | P1: corrige filtro de cidade e normaliza duplicidades |
+| `19f6988` | `docs` | Registra execução de P1 |
+| `1009fda` | `feat` | P2: adiciona label discreto de versão MVP |
+| `cbd0ddf` | `docs` | Registra execução de P2 |
+| `(este commit)` | `docs` | Consolida fechamento da Fase C1 |
+
+### Verificações realizadas ao longo da fase
+
+- `ast.parse()` executado antes de cada commit técnico — sintaxe Python válida em todos;
+- `git diff` inspecionado antes de cada commit — diffs cirúrgicos confirmados;
+- P0 verificado como intacto nos diffs de P1 e P2;
+- P1 verificado como intacto no diff de P2;
+- inspeção visual do dashboard aprovada pelo professor:
+  - timestamp visível na sidebar;
+  - label de versão MVP visível e discreto;
+  - navegação orientada a UBS/gestão.
+
+### Observações validadas
+
+- pasta `Data/PARQUET` do workspace local copiada para dentro do clone oficial para execução local — necessária para rodar o dashboard em modo cache/local;
+- inspeção visual realizada e aprovada;
+- label `📅 Dados atualizados em:` aprovado;
+- label `Dashboard CONEMO — Versão MVP` aprovado.
+
+### Confirmações de escopo
+
+| Item | Status |
+|---|---|
+| Alteração de credenciais | ❌ Não realizada |
+| Integração externa nova | ❌ Não realizada |
+| Deploy | ❌ Não realizado |
+| Mudança de regra clínica | ❌ Não realizada |
+| Refatoração ampla | ❌ Não realizada |
+| Merge em `main` | ❌ Não realizado |
+| Push da branch | ✅ Realizado |
+| Pull Request aberto | ✅ Realizado |
+
+### Pendências remanescentes
+
+- **Merge**: aguarda revisão e aprovação humana no PR;
+- **BigQuery**: o botão `🔄` opera em modo cache/local; a integração com credencial Google/BigQuery é pendência de fase futura, conforme decisão vinculante da coordenação;
+- **Dados**: o arquivo Parquet local (`Data/PARQUET/`) não faz parte do repositório Git — cópia manual necessária para execução local do clone.
