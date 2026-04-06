@@ -22,6 +22,29 @@ PARQUET_PATH = os.path.join(
 )
 
 # ---------------------------------------------------------------------------
+# P0.1 — Timestamp da última atualização do cache (arquivo Parquet local)
+#
+# O dashboard opera em modo cache/local. A função abaixo obtém a data e hora
+# da última modificação do arquivo Parquet que serve de base para os dados
+# exibidos. Esse timestamp é exibido na sidebar para indicar a atualidade
+# das informações visualizadas.
+# ---------------------------------------------------------------------------
+def get_cache_timestamp() -> str:
+    """Retorna o timestamp de última modificação do arquivo Parquet de cache.
+
+    Se o arquivo não existir ou ocorrer erro na leitura, retorna uma mensagem
+    informativa em vez de propagar a exceção.
+    """
+    try:
+        mtime = os.path.getmtime(PARQUET_PATH)
+        return datetime.fromtimestamp(mtime).strftime("%d/%m/%Y %H:%M:%S")
+    except FileNotFoundError:
+        return "Arquivo de cache não encontrado"
+    except Exception:
+        return "Não disponível"
+
+
+# ---------------------------------------------------------------------------
 # Carregamento e pré-processamento dos dados
 # ---------------------------------------------------------------------------
 @st.cache_data
@@ -98,13 +121,40 @@ def load_data() -> pd.DataFrame:
 df = load_data()
 
 # ---------------------------------------------------------------------------
-# Sidebar — navegação
+# Sidebar — navegação, timestamp e botão de atualização
+#
+# P0.2: a navegação principal é orientada a UBS/gestão. A visão individual
+#       por participante não compõe a navegação principal do MVP visual
+#       (decisão vinculante — Plano-implementacao-dashboard.md §8, item 8).
+#       Sua lógica permanece no código e é acessível via seção própria
+#       dentro da página de UBS.
+# P0.3: o botão 🔄 é mantido visível na sidebar. A operação está
+#       temporariamente condicionada à credencial Google/BigQuery; no estado
+#       atual o dashboard opera em modo cache/local. A presença do botão
+#       não é bloqueadora da execução (decisão vinculante de coordenação).
 # ---------------------------------------------------------------------------
 st.sidebar.title("🏥 CONEMO")
 st.sidebar.markdown("---")
+
+# P0.1 — Timestamp da última atualização do cache
+st.sidebar.markdown("**📅 Dados atualizados em:**")
+st.sidebar.info(get_cache_timestamp())
+st.sidebar.markdown("*Modo: cache local*")
+
+st.sidebar.markdown("---")
+
+# P0.3 — Botão de atualização (operação condicionada à credencial BigQuery;
+#         mantido visível conforme decisão vinculante da coordenação)
+if st.sidebar.button("🔄 Atualizar dados"):
+    st.cache_data.clear()
+    st.rerun()
+
+st.sidebar.markdown("---")
+
+# P0.2 — Navegação principal orientada a UBS/gestão
 page = st.sidebar.radio(
     "Navegação",
-    ["📊 Estatísticas por UBS", "👤 Estatísticas por ID"],
+    ["📊 Estatísticas por UBS"],
 )
 
 # ---------------------------------------------------------------------------
@@ -306,153 +356,159 @@ if page == "📊 Estatísticas por UBS":
 
 
 # ---------------------------------------------------------------------------
-# Página 2 — Estatísticas por ID
+# Visão individual por participante
+#
+# P0.2: esta visão não compõe a navegação principal do MVP visual.
+# A lógica analítica é preservada integralmente e permanece acessível
+# via expander na página de UBS/gestão.
 # ---------------------------------------------------------------------------
-elif page == "👤 Estatísticas por ID":
-    st.title("Estatísticas por Participante")
+st.markdown("---")
+with st.expander("👤 Consulta individual por participante (visão auxiliar)"):
+    if True:
+        st.subheader("Estatísticas por Participante")
 
-    # Selectbox de user_id
-    user_ids = sorted(df["user_id"].dropna().unique())
-    selected_id = st.selectbox("Selecione o ID do participante", user_ids)
+        # Selectbox de user_id
+        user_ids = sorted(df["user_id"].dropna().unique())
+        selected_id = st.selectbox("Selecione o ID do participante", user_ids)
 
-    df_user = df[df["user_id"] == selected_id]
-    if df_user.empty:
-        st.warning("Participante não encontrado.")
-        st.stop()
+        df_user = df[df["user_id"] == selected_id]
+        if df_user.empty:
+            st.warning("Participante não encontrado.")
+            st.stop()
 
-    # Pega a primeira linha para dados de perfil (únicos por usuário)
-    row = df_user.iloc[0]
+        # Pega a primeira linha para dados de perfil (únicos por usuário)
+        row = df_user.iloc[0]
 
-    # --- Perfil ---
-    st.markdown("---")
-    st.subheader("Perfil")
+        # --- Perfil ---
+        st.markdown("---")
+        st.subheader("Perfil")
 
-    gender_label = {"F": "Feminino", "M": "Masculino"}.get(str(row.get("gender", "")), "Não informado")
-    age_str = f"{int(row['age'])} anos" if pd.notna(row.get("age")) else "N/D"
-    email_raw = str(row.get("email", "N/D"))
-    # Mascara o email: mostra primeiros 3 chars + *** + domínio
-    if "@" in email_raw:
-        local, domain = email_raw.split("@", 1)
-        email_masked = local[:3] + "***@" + domain
-    else:
-        email_masked = email_raw
+        gender_label = {"F": "Feminino", "M": "Masculino"}.get(str(row.get("gender", "")), "Não informado")
+        age_str = f"{int(row['age'])} anos" if pd.notna(row.get("age")) else "N/D"
+        email_raw = str(row.get("email", "N/D"))
+        # Mascara o email: mostra primeiros 3 chars + *** + domínio
+        if "@" in email_raw:
+            local, domain = email_raw.split("@", 1)
+            email_masked = local[:3] + "***@" + domain
+        else:
+            email_masked = email_raw
 
-    p1, p2, p3, p4, p5 = st.columns(5)
-    p1.metric("UBS", row.get("ubs_name", "N/D"))
-    p2.metric("Cidade", row.get("ubs_city", "N/D"))
-    p3.metric("Gênero", gender_label)
-    p4.metric("Idade", age_str)
-    p5.metric("E-mail", email_masked)
+        p1, p2, p3, p4, p5 = st.columns(5)
+        p1.metric("UBS", row.get("ubs_name", "N/D"))
+        p2.metric("Cidade", row.get("ubs_city", "N/D"))
+        p3.metric("Gênero", gender_label)
+        p4.metric("Idade", age_str)
+        p5.metric("E-mail", email_masked)
 
-    # --- Scores de saúde mental ---
-    st.markdown("---")
-    st.subheader("Scores de Saúde Mental (Baseline)")
+        # --- Scores de saúde mental ---
+        st.markdown("---")
+        st.subheader("Scores de Saúde Mental (Baseline)")
 
-    phq = row.get("phq_score")
-    gad = row.get("gad_score")
-    phq_label = phq_severity(phq)
-    gad_label = gad_severity(gad)
+        phq = row.get("phq_score")
+        gad = row.get("gad_score")
+        phq_label = phq_severity(phq)
+        gad_label = gad_severity(gad)
 
-    sc1, sc2 = st.columns(2)
+        sc1, sc2 = st.columns(2)
 
-    with sc1:
-        phq_val = float(phq) if phq is not None else 0
-        fig_phq = go.Figure(
-            go.Indicator(
-                mode="gauge+number",
-                value=phq_val,
-                title={"text": f"PHQ-9 — {phq_label}"},
-                gauge={
-                    "axis": {"range": [0, 27]},
-                    "bar": {"color": "#EF553B"},
-                    "steps": [
-                        {"range": [0, 4], "color": "#d4edda"},
-                        {"range": [4, 9], "color": "#fff3cd"},
-                        {"range": [9, 14], "color": "#ffd8b1"},
-                        {"range": [14, 19], "color": "#f8d7da"},
-                        {"range": [19, 27], "color": "#c0392b"},
-                    ],
-                    "threshold": {"line": {"color": "black", "width": 3}, "value": phq_val},
-                },
+        with sc1:
+            phq_val = float(phq) if phq is not None else 0
+            fig_phq = go.Figure(
+                go.Indicator(
+                    mode="gauge+number",
+                    value=phq_val,
+                    title={"text": f"PHQ-9 — {phq_label}"},
+                    gauge={
+                        "axis": {"range": [0, 27]},
+                        "bar": {"color": "#EF553B"},
+                        "steps": [
+                            {"range": [0, 4], "color": "#d4edda"},
+                            {"range": [4, 9], "color": "#fff3cd"},
+                            {"range": [9, 14], "color": "#ffd8b1"},
+                            {"range": [14, 19], "color": "#f8d7da"},
+                            {"range": [19, 27], "color": "#c0392b"},
+                        ],
+                        "threshold": {"line": {"color": "black", "width": 3}, "value": phq_val},
+                    },
+                )
             )
-        )
-        fig_phq.update_layout(height=280)
-        st.plotly_chart(fig_phq, width='stretch')
-        st.markdown(
-            f"<p style='text-align:center; color:{severity_color(phq_label)}; font-weight:bold'>"
-            f"Depressão: {phq_label} (score {phq_val:.0f}/27)</p>",
-            unsafe_allow_html=True,
-        )
-
-    with sc2:
-        gad_val = float(gad) if gad is not None else 0
-        fig_gad = go.Figure(
-            go.Indicator(
-                mode="gauge+number",
-                value=gad_val,
-                title={"text": f"GAD-7 — {gad_label}"},
-                gauge={
-                    "axis": {"range": [0, 21]},
-                    "bar": {"color": "#636EFA"},
-                    "steps": [
-                        {"range": [0, 4], "color": "#d4edda"},
-                        {"range": [4, 9], "color": "#fff3cd"},
-                        {"range": [9, 14], "color": "#f8d7da"},
-                        {"range": [14, 21], "color": "#c0392b"},
-                    ],
-                    "threshold": {"line": {"color": "black", "width": 3}, "value": gad_val},
-                },
+            fig_phq.update_layout(height=280)
+            st.plotly_chart(fig_phq, width='stretch')
+            st.markdown(
+                f"<p style='text-align:center; color:{severity_color(phq_label)}; font-weight:bold'>"
+                f"Depressão: {phq_label} (score {phq_val:.0f}/27)</p>",
+                unsafe_allow_html=True,
             )
+
+        with sc2:
+            gad_val = float(gad) if gad is not None else 0
+            fig_gad = go.Figure(
+                go.Indicator(
+                    mode="gauge+number",
+                    value=gad_val,
+                    title={"text": f"GAD-7 — {gad_label}"},
+                    gauge={
+                        "axis": {"range": [0, 21]},
+                        "bar": {"color": "#636EFA"},
+                        "steps": [
+                            {"range": [0, 4], "color": "#d4edda"},
+                            {"range": [4, 9], "color": "#fff3cd"},
+                            {"range": [9, 14], "color": "#f8d7da"},
+                            {"range": [14, 21], "color": "#c0392b"},
+                        ],
+                        "threshold": {"line": {"color": "black", "width": 3}, "value": gad_val},
+                    },
+                )
+            )
+            fig_gad.update_layout(height=280)
+            st.plotly_chart(fig_gad, width='stretch')
+            st.markdown(
+                f"<p style='text-align:center; color:{severity_color(gad_label)}; font-weight:bold'>"
+                f"Ansiedade: {gad_label} (score {gad_val:.0f}/21)</p>",
+                unsafe_allow_html=True,
+            )
+
+        # --- Progresso das sessões ---
+        st.markdown("---")
+        st.subheader("Progresso das Sessões")
+
+        sessions = (
+            df_user.drop_duplicates(subset="sessionNumber")
+            .sort_values("sessionNumber")[["sessionNumber", "isCompleted", "completedDate"]]
+            .copy()
         )
-        fig_gad.update_layout(height=280)
-        st.plotly_chart(fig_gad, width='stretch')
-        st.markdown(
-            f"<p style='text-align:center; color:{severity_color(gad_label)}; font-weight:bold'>"
-            f"Ansiedade: {gad_label} (score {gad_val:.0f}/21)</p>",
-            unsafe_allow_html=True,
+        total_sess = len(sessions)
+        done_sess = int(sessions["isCompleted"].sum())
+
+        s1, s2, s3 = st.columns(3)
+        s1.metric("Total de sessões", total_sess)
+        s2.metric("Concluídas", done_sess)
+        s3.metric("Taxa de conclusão", f"{done_sess/total_sess*100:.0f}%" if total_sess > 0 else "N/D")
+
+        sessions["Status"] = sessions["isCompleted"].map(
+            {True: "Concluída", False: "Não concluída", None: "N/D"}
+        ).fillna("N/D")
+        sessions["Sessão"] = "Sessão " + sessions["sessionNumber"].astype(int).astype(str)
+
+        fig_sess = px.bar(
+            sessions,
+            x="Sessão",
+            y=[1] * len(sessions),
+            color="Status",
+            color_discrete_map={"Concluída": "#2ecc71", "Não concluída": "#e74c3c", "N/D": "#bdc3c7"},
+            labels={"y": ""},
+            height=220,
         )
+        fig_sess.update_yaxes(visible=False)
+        fig_sess.update_layout(showlegend=True, bargap=0.1)
+        st.plotly_chart(fig_sess, width='stretch')
 
-    # --- Progresso das sessões ---
-    st.markdown("---")
-    st.subheader("Progresso das Sessões")
-
-    sessions = (
-        df_user.drop_duplicates(subset="sessionNumber")
-        .sort_values("sessionNumber")[["sessionNumber", "isCompleted", "completedDate"]]
-        .copy()
-    )
-    total_sess = len(sessions)
-    done_sess = int(sessions["isCompleted"].sum())
-
-    s1, s2, s3 = st.columns(3)
-    s1.metric("Total de sessões", total_sess)
-    s2.metric("Concluídas", done_sess)
-    s3.metric("Taxa de conclusão", f"{done_sess/total_sess*100:.0f}%" if total_sess > 0 else "N/D")
-
-    sessions["Status"] = sessions["isCompleted"].map(
-        {True: "Concluída", False: "Não concluída", None: "N/D"}
-    ).fillna("N/D")
-    sessions["Sessão"] = "Sessão " + sessions["sessionNumber"].astype(int).astype(str)
-
-    fig_sess = px.bar(
-        sessions,
-        x="Sessão",
-        y=[1] * len(sessions),
-        color="Status",
-        color_discrete_map={"Concluída": "#2ecc71", "Não concluída": "#e74c3c", "N/D": "#bdc3c7"},
-        labels={"y": ""},
-        height=220,
-    )
-    fig_sess.update_yaxes(visible=False)
-    fig_sess.update_layout(showlegend=True, bargap=0.1)
-    st.plotly_chart(fig_sess, width='stretch')
-
-    # Tabela de sessões
-    with st.expander("Ver tabela de sessões"):
-        st.dataframe(
-            sessions[["Sessão", "Status", "completedDate"]].rename(
-                columns={"completedDate": "Data de conclusão"}
-            ),
-            width='stretch',
-            hide_index=True,
-        )
+        # Tabela de sessões
+        with st.expander("Ver tabela de sessões"):
+            st.dataframe(
+                sessions[["Sessão", "Status", "completedDate"]].rename(
+                    columns={"completedDate": "Data de conclusão"}
+                ),
+                width='stretch',
+                hide_index=True,
+            )
