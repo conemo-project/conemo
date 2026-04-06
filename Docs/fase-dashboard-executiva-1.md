@@ -1,7 +1,8 @@
 # Fase C1 — Minuta executiva para o Agente Executor (abertura formal registrada no clone oficial)
 
 **Data de registro:** 2026-04-06  
-**Status:** Etapa 0 preparatória + Etapa 1 formal executadas no clone oficial — sem implementação funcional de P0/P1/P2  
+**Última atualização:** 2026-04-06 — Etapa 2 concluída (P0 implementado, commit `5ce299d`)  
+**Status:** Etapa 2 executada — P0 implementado; P1/P2 pendentes de autorização  
 **Modo principal:** Tipo F — dashboard, relatórios e exportação  
 **Sequência secundária:** Tipo G — auditoria e reconciliação; Tipo H — documentação e handoff  
 **Branch da fase:** `feat/dashboard-fase-c1-mvp-operacional`  
@@ -16,6 +17,46 @@
 - integração restrita a `README.md`, documentos canônicos em `Docs/`, `Code/README.md` e `Code/PY/dashboard_conemo.py`;
 - nenhuma implementação funcional do dashboard foi iniciada nesta etapa;
 - `Code/PY/dashboard_conemo.py` foi apenas integrado ao clone oficial, sem edição.
+
+## Registro de execução — Etapa 2: P0
+
+**Commit técnico:** `5ce299d`  
+**Mensagem:** `feat: prioriza navegacao UBS-gestao, exibe timestamp cache e adiciona botao atualizar (P0)`  
+**Arquivo editado:** `Code/PY/dashboard_conemo.py`  
+**Validação:** `ast.parse()` confirmou sintaxe Python válida antes do commit
+
+### P0.1 — Timestamp do cache
+
+- adicionada a função `get_cache_timestamp()` que lê `os.path.getmtime(PARQUET_PATH)`;
+- resultado exibido na sidebar com `st.sidebar.info()` e label `📅 Dados atualizados em:`;
+- rótulo de modo `*Modo: cache local*` exibido abaixo para transparência operacional;
+- tratamento de `FileNotFoundError` e exceção genérica incluído (sem propagação).
+
+### P0.2 — Navegação reorientada para UBS/gestão
+
+- `st.sidebar.radio` passou de `["📊 Estatísticas por UBS", "👤 Estatísticas por ID"]` para `["📊 Estatísticas por UBS"]`;
+- visão individual por participante preservada integralmente no código;
+- lógica individual migrada para `st.expander("👤 Consulta individual por participante (visão auxiliar)")` dentro da página de UBS;
+- nenhuma análise ou dado da visão individual foi removido.
+
+### P0.3 — Botão 🔄 Atualizar dados
+
+- adicionado `st.sidebar.button("🔄 Atualizar dados")` na sidebar;
+- ação: `st.cache_data.clear()` + `st.rerun()`;
+- botão mantido visível conforme decisão vinculante da coordenação (2026-04-06);
+- operação condicionada à credencial BigQuery em modo online (não bloqueadora no modo cache/local atual).
+
+### Status após Etapa 2
+
+| Item | Status |
+|------|--------|
+| P0.1 — Timestamp cache | ✅ Implementado |
+| P0.2 — Nav. UBS/gestão | ✅ Implementado |
+| P0.3 — Botão 🔄 | ✅ Implementado |
+| P1 — Filtro cidade | ⬜ Pendente de autorização |
+| P2 — Label versão MVP | ⬜ Pendente de autorização |
+| Push para remoto | ⬜ Pendente |
+| PR | ⬜ Pendente |
 
 ---
 
