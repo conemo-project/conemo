@@ -1,8 +1,8 @@
 # Fase C1 — Minuta executiva para o Agente Executor (abertura formal registrada no clone oficial)
 
 **Data de registro:** 2026-04-06  
-**Última atualização:** 2026-04-06 — Fase C1 fechada formalmente; PR aberto para revisão  
-**Status:** ✅ Fase C1 concluída — P0/P1/P2 implementados, branch publicada, PR aberto; aguardando merge  
+**Última atualização:** 2026-04-07 — encerramento pós-merge registrado na `main`  
+**Status:** ✅ Fase C1 encerrada — PR #1 revisado, aprovado e incorporado à `main`; P0/P1/P2 integrados à versão principal do repositório  
 **Modo principal:** Tipo F — dashboard, relatórios e exportação  
 **Sequência secundária:** Tipo G — auditoria e reconciliação; Tipo H — documentação e handoff  
 **Branch da fase:** `feat/dashboard-fase-c1-mvp-operacional`  
@@ -518,7 +518,7 @@ Ao final, o executor deve entregar um relatório curto com:
 
 ### Fechamento formal
 
-A Fase C1 do dashboard CONEMO foi concluída integralmente. Todas as entregas de P0, P1 e P2 foram implementadas, validadas e commitadas na branch `feat/dashboard-fase-c1-mvp-operacional`. A branch foi publicada em `origin` e o Pull Request foi aberto para revisão humana.
+A Fase C1 do dashboard CONEMO foi concluída integralmente. Todas as entregas de P0, P1 e P2 foram implementadas, validadas e commitadas na branch `feat/dashboard-fase-c1-mvp-operacional`. A branch foi publicada em `origin`, revisada por humano e mergeada na `main` por meio do PR #1.
 
 ### Arquivo técnico principal modificado
 
@@ -567,12 +567,23 @@ A Fase C1 do dashboard CONEMO foi concluída integralmente. Todas as entregas de
 | Deploy | ❌ Não realizado |
 | Mudança de regra clínica | ❌ Não realizada |
 | Refatoração ampla | ❌ Não realizada |
-| Merge em `main` | ❌ Não realizado |
+| Merge em `main` | ✅ Realizado via PR #1 |
 | Push da branch | ✅ Realizado |
-| Pull Request aberto | ✅ Realizado |
+| Pull Request aberto | ✅ Realizado e mergeado |
 
 ### Pendências remanescentes
 
-- **Merge**: aguarda revisão e aprovação humana no PR;
 - **BigQuery**: o botão `🔄` opera em modo cache/local; a integração com credencial Google/BigQuery é pendência de fase futura, conforme decisão vinculante da coordenação;
-- **Dados**: o arquivo Parquet local (`Data/PARQUET/`) não faz parte do repositório Git — cópia manual necessária para execução local do clone.
+- **Dados**: o arquivo Parquet local (`Data/PARQUET/`) não faz parte do repositório Git — cópia manual necessária para execução local do clone;
+- **Priorização futura**: quaisquer próximas decisões dependem de priorização formal da coordenação para a fase seguinte.
+
+### Registro pós-merge
+
+- PR da Fase C1 revisado, aprovado e incorporado à `main`;
+- número do PR mergeado: **#1**;
+- data do merge registrada no GitHub: **2026-04-07T01:19:23Z**;
+- as entregas P0, P1 e P2 passam a integrar formalmente a versão principal do repositório.
+
+## Nota curta de encerramento
+
+Fase C1 encerrada. O PR da fase foi revisado, aprovado e incorporado à `main`. Com isso, as entregas P0, P1 e P2 do dashboard CONEMO passam a integrar formalmente a versão principal do repositório. As próximas decisões ficam condicionadas à priorização da coordenação para a fase seguinte.
