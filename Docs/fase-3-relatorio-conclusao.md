@@ -1,7 +1,7 @@
-# Fase 3 — Relatório de conclusão
+# Fase 3 — Relatório de conclusão da Etapa 3.1 (fase em aberto)
 
 **Data:** 2026-04-07  
-**Status:** Fase 3 — Etapa 3.1 documentação concluída, aguardando aprovação para prosseguir a Etapa 3.2 (implementação SQL)  
+**Status:** Etapa 3.1 aprovada com ressalvas documentadas; Fase 3 permanece em aberto  
 **Autor:** Ricardo Ceneviva  
 **Branch:** `fase-3-construcao-marts-minimos`
 
@@ -43,17 +43,17 @@ Nenhum arquivo foi modificado — apenas criações.
 
 ---
 
-## Campo 3: Conteúdo principal implementado
+## Campo 3: Conteúdo principal implementado (Etapa 3.1)
 
 ### 3.1 Estrutura de execução (5 etapas planejadas)
 
 | Etapa | Nome | Status | Artefatos |
 |---|---|---|---|
-| 3.1 | Documentação de requisitos e rastreabilidade | ✅ **Concluída** | 5 documentos MD |
-| 3.2 | Implementação SQL de 3 marts com programação letrada | ⏳ Planejada | 3 scripts SQL + comentários |
-| 3.3 | Queries de validação cruzada | ⏳ Planejada | 1 script SQL de auditoria |
+| 3.1 | Documentação de requisitos e rastreabilidade | ✅ **Concluída e aprovada com ressalvas** | 5 documentos MD |
+| 3.2 | Implementação SQL de 3 marts com programação letrada | ⏳ **Não iniciada** | 3 scripts SQL + comentários |
+| 3.3 | Queries de validação cruzada | ⏳ **Não iniciada** | 1 script SQL de auditoria |
 | 3.4 | Documentação de limites herdados (já integrada em 3.1) | ✅ **Concluída** | Documento dedicado |
-| 3.5 | Relatório de conclusão | ⏳ Planejada | Relatório final |
+| 3.5 | Relatório de conclusão da Fase 3 (final) | ⏳ Não iniciada | Relatório final |
 
 ### 3.2 Conteúdo de Etapa 3.1 (concluído)
 
@@ -153,7 +153,7 @@ participant_count_ubs
 
 ---
 
-## Campo 7: Validações realizadas
+## Campo 7: Validações realizadas (até Etapa 3.1)
 
 ### 7.1 Validação de escopo (Etapa 3.1)
 
@@ -196,7 +196,7 @@ participant_count_ubs
 - ✅ Campos indisponíveis — notificações, chatbot, ajuda, todos documentados
 - ✅ Pressuposição ZERO de produção — marca crítica a ser incluída em cada script
 
-### 7.5 Verificações não realizadas em Etapa 3.1 (pendentes Etapa 3.2+)
+### 7.5 Verificações ainda pendentes (Etapa 3.2+)
 
 ❓ Sintaxe SQL (realizado em Etapa 3.2 — desenvolvimento)
 ❓ Teste lógico (realizado em Etapa 3.2 — testes)
@@ -241,13 +241,15 @@ participant_count_ubs
 
 ---
 
-## Campo 9: Pendências
+## Campo 9: Pendências (para continuidade da Fase 3)
 
-### 9.1 Críticas (bloqueiam Etapa 3.2)
+### 9.1 Críticas (bloqueiam encerramento da Fase 3)
 
-- [ ] **Aprovação formal do plano operacional** — Professor aprova escopo, arquitetura, Etapa 3.1 como pronto?
-- [ ] **Aprovação formal da matriz de rastreamento** — Cobertura de requisitos está completa? Lacunas?
-- [ ] **Confirmação de aceitabilidade de D1, N7, métrica indisponíveis** — Stakeholder aceita ressalvas?
+- [x] **Aprovação formal da Etapa 3.1** — Aprovada com ressalvas documentadas em parecer de auditoria (07/04/2026).
+- [ ] **Implementação SQL das 3 marts mínimas** — `mart_ubs_monitoring_v1`, `mart_project_management_v1`, `mart_dashboard_export_v1`.
+- [ ] **Queries de validação cruzada das marts** — comprovação técnica requisito ↔ métrica ↔ mart.
+- [ ] **Verificação computacional de consumo sem parse estrutural adicional no dashboard**.
+- [ ] **Consolidação final da Fase 3 (Etapa 3.5)** após implementação e validações técnicas.
 
 ### 9.2 Operacionais (podem executar em paralelo com Etapa 3.2)
 
@@ -365,7 +367,7 @@ B. Deixar métricas de tempo como indisponíveis — não calcular tempos até d
 
 ## Resumo de conclusão
 
-**Etapa 3.1 — Documentação de Fase 3 foi concluída com sucesso.**
+**Etapa 3.1 — Documentação de Fase 3 foi concluída e aprovada com ressalvas.**
 
 - ✅ **5 documentos de especificação** (~1.825 linhas) produzidos
 - ✅ **5 commits semânticos** auditáveis no GitHub institucional
@@ -378,11 +380,17 @@ B. Deixar métricas de tempo como indisponíveis — não calcular tempos até d
 - ✅ **Governança incorporada**
 - ✅ **Transição Fase 2 → 3** documentada
 
-**Aguardando:** Aprovação formal para prosseguir a Etapa 3.2 (implementação SQL dos marts).
+**Situação atual:**
+- Etapa 3.1: **aprovada com ressalvas documentadas**
+- Fase 3: **em aberto**
+- Fase 4: **não autorizada**
+
+**Aguardando:** execução da Etapa 3.2 e Etapa 3.3 para posterior consolidação final da Fase 3.
 
 ---
 
 **Data de conclusão de Etapa 3.1:** 2026-04-07  
-**Data de aprovação prevista para Etapa 3.2:** [a preencher]  
+**Data de aprovação da Etapa 3.1:** 2026-04-07 (parecer de auditoria)  
+**Data de autorização para Etapa 3.2:** [a preencher]  
 **Aprovador:** [Professor/Revisor]
 
