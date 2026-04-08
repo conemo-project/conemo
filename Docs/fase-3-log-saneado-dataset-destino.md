@@ -54,6 +54,22 @@
 
 ---
 
+## Bloco C — Saneamento da ressalva ADC (2026-04-07)
+
+### [C1] Ajuste do quota project nas Application Default Credentials
+- Comando executado: `gcloud auth application-default set-quota-project conemo-412202`
+- Resultado: **sucesso**
+
+### [C2] Confirmação operacional pós-ajuste
+- Verificação via `bq` com visibilidade normal do dataset `firestore_curated`
+- Resultado: **OK — sem warning de quota project ADC**
+
+### [C3] Impacto na classificação do ambiente
+- Classificação anterior: `APTO COM RESSALVAS`
+- Classificação atual: **APTO**
+
+---
+
 ## Controle de escopo e segurança (Etapas 1 e 2)
 
 - marts criadas: **não**
@@ -67,7 +83,7 @@
 
 ## Resultado operacional consolidado
 
-- Etapa 1 (preparação do dataset): **concluída com ressalvas**
-- Etapa 2 (checkpoint final): **apto com ressalvas**
+- Etapa 1 (preparação do dataset): **concluída**
+- Etapa 2 (checkpoint final): **apto**
 - Etapa 3.2: **não iniciada**
-- Ressalva remanescente: warning de quota project ADC (não bloqueante)
+- Ressalvas remanescentes: **nenhuma** (ressalva ADC saneada em 2026-04-07)

@@ -129,20 +129,20 @@ Resultado: ✅ conforme escopo autorizado
 
 ## 6) Classificação final do ambiente
 
-**Resultado final do checkpoint:** **APTO COM RESSALVAS**
+**Resultado final do checkpoint:** **APTO** *(reclassificado em 2026-04-07 após saneamento da ressalva ADC)*
 
 Justificativa:
 1. dataset de destino está visível e compatível;
 2. leitura das fontes mínimas está funcional;
 3. condição de escrita autorizada foi validada por dry-run sem extrapolação de escopo;
-4. persiste ressalva operacional de quota project ADC (não bloqueante).
+4. ~~ressalva operacional de quota project ADC~~ — **saneada**: `gcloud auth application-default set-quota-project conemo-412202` executado e confirmado operacionalmente com visibilidade normal do dataset `firestore_curated`.
 
 ---
 
 ## 7) Pendências e decisão humana
 
 Pendências:
-1. ajuste institucional opcional do quota project ADC para reduzir ruído operacional;
+1. ~~ajuste institucional do quota project ADC~~ — **encerrado** (2026-04-07): confirmado operacionalmente via `bq`;
 2. auditoria formal desta Etapa 2.
 
 Decisão humana necessária:
@@ -152,9 +152,9 @@ Decisão humana necessária:
 
 ## 8) Conclusão formal da Etapa 2
 
-O checkpoint operacional final de prontidão foi concluído de forma auditável no repositório institucional, em branch dedicada, com segurança e sem extrapolação de escopo.
+O checkpoint operacional final de prontidão foi concluído de forma auditável no repositório institucional, em branch dedicada, com segurança e sem extrapolação de escopo. A ressalva operacional sobre quota project ADC foi saneada em 2026-04-07 e confirmada operacionalmente, resultando em reclassificação do ambiente.
 
 Situação final:
-- ambiente: **apto com ressalvas** para início controlado da Etapa 3.2;
+- ambiente: **apto** para início controlado da Etapa 3.2;
 - Etapa 3.2: **não iniciada**;
 - criação de marts/views de marts: **não realizada**.
