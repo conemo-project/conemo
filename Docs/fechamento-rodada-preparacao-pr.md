@@ -5,6 +5,7 @@
 **Projeto:** CONEMO  
 **Tipo da etapa:** documental e governança (não é nova fase técnica)  
 **Parecer de auditoria da etapa:** `Docs/parecer-auditoria-preparacao-pr-2026-04-08.md` (aprovada)
+**Parecer de auditoria da abertura do PR:** `Docs/parecer-auditoria-abertura-pr-2026-04-08.md` (aprovada)
 
 ---
 
@@ -130,6 +131,7 @@ O Pull Request foi aberto com segurança em 08/04/2026:
 - **Descrição aplicada:** conforme seção 5.2 deste documento
 - **Estado:** aberto — aguardando revisão institucional
 - **Ação proibida:** merge não realizado; nenhuma nova fase foi iniciada
+- **Parecer formal desta etapa de abertura:** `Docs/parecer-auditoria-abertura-pr-2026-04-08.md` (aprovada)
 
 ---
 
