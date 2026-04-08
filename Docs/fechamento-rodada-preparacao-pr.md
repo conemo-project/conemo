@@ -117,6 +117,22 @@ A rodada do Plano de Pré-processamento de Dados está **pronta para revisão in
 
 ---
 
-## 6) Declaração desta etapa
+## 6) Registro da abertura do Pull Request
+
+O Pull Request foi aberto com segurança em 08/04/2026:
+
+- **Identificador:** [conemo-project/conemo#2](https://github.com/conemo-project/conemo/pull/2)
+- **URL:** https://github.com/conemo-project/conemo/pull/2
+- **Branch de origem:** `fechamento-rodada-preparacao-pr`
+- **Branch de destino:** `main`
+- **Commits incluídos:** 28 commits da trilha técnica e documental das Fases 0–6 (HEAD: `7a39197`)
+- **Mudanças locais não relacionadas:** confirmadas como não incluídas (não commitadas, fora do PR)
+- **Descrição aplicada:** conforme seção 5.2 deste documento
+- **Estado:** aberto — aguardando revisão institucional
+- **Ação proibida:** merge não realizado; nenhuma nova fase foi iniciada
+
+---
+
+## 7) Declaração desta etapa
 
 Esta etapa foi executada exclusivamente no repositório institucional, com branch própria e rastreabilidade explícita. Não houve reabertura de mérito técnico e nenhuma nova fase foi iniciada.
