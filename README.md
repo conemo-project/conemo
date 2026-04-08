@@ -78,6 +78,7 @@ Resumo factual do estado documentado:
 - a **Fase A** (configuração avançada mínima do GitHub) está **formalmente encerrada** como aprovada com ressalvas (auditoria final: 2026-04-06); documentada em [Docs/fase-github-configuracao-avancada.md](Docs/fase-github-configuracao-avancada.md); o projeto está **autorizado a avançar para a Fase B**.
 - a **Fase B** (revisão final documental do plano canônico do dashboard) está **formalmente encerrada** em 2026-04-06: [Docs/Plano-implementacao-dashboard.md](Docs/Plano-implementacao-dashboard.md) consolidado como versão final canônica (V.2.0.0); decisão sobre botão `🔄`, requisito de `timestamp` e separação entre MVP visual / backend-modelagem / fase posterior incorporados; projeto pronto para abertura da Fase C.
 - a **Fase C** (melhorias do dashboard) está **formalmente aberta** em 2026-04-06 para preparação executiva, registrada em [Docs/fase-c-abertura-melhorias-dashboard-conemo.md](Docs/fase-c-abertura-melhorias-dashboard-conemo.md), sem implementação técnica iniciada neste registro.
+- a **Fase 6** (qualidade, segurança e handoff) está **formalmente aprovada e encerrada** em 08/04/2026, com parecer em [Docs/fase-6-parecer-auditoria-2026-04-08.md](Docs/fase-6-parecer-auditoria-2026-04-08.md) e relatório em [Docs/fase-6-relatorio-conclusao-rodada.md](Docs/fase-6-relatorio-conclusao-rodada.md).
 
 Importante:
 
@@ -114,6 +115,7 @@ Referência canônica para esse enquadramento: [Docs/Plano-implementacao-dashboa
 - **Fase A — Configuração avançada mínima do GitHub**: política mínima de contribuição definida, bloqueio HTTP 403 registrado sem improvisação, auditoria de ajustes aprovada em 2026-04-06 — **fase formalmente encerrada; clearance para Fase B concedido**
 - **Fase B — Revisão final documental do plano canônico**: [Docs/Plano-implementacao-dashboard.md](Docs/Plano-implementacao-dashboard.md) consolidado como V.2.0.0 (versão final canônica), **formalmente encerrado** em auditoria; decisão sobre botão `🔄`, navegação UBS-first e `timestamp` incorporados; projeto pronto para abertura da Fase C
 - **Fase C — Abertura da fase de melhorias do dashboard**: kickoff documental registrado em [Docs/fase-c-abertura-melhorias-dashboard-conemo.md](Docs/fase-c-abertura-melhorias-dashboard-conemo.md); base executiva mantida no plano canônico + complemento do Passo 4; sem início de implementação neste ato
+- **Fase 6 — Qualidade, segurança e handoff**: fase formalmente auditada como **aprovada e encerrada** em 08/04/2026, com saneamento da pendência final de governança/rastreabilidade registrado em [Docs/fase-6-parecer-auditoria-2026-04-08.md](Docs/fase-6-parecer-auditoria-2026-04-08.md)
 
 Observação: esta lista é histórico de execução/documentação, não cronograma automático de próximas fases.
 
@@ -145,6 +147,8 @@ Ordem recomendada de leitura para retomada:
 7. [Docs/github-setup-fase-organizacao-repositorio.md](Docs/github-setup-fase-organizacao-repositorio.md)
 8. [Docs/fase-github-configuracao-avancada.md](Docs/fase-github-configuracao-avancada.md)
 9. [Docs/fase-c-abertura-melhorias-dashboard-conemo.md](Docs/fase-c-abertura-melhorias-dashboard-conemo.md)
+10. [Docs/fase-6-relatorio-conclusao-rodada.md](Docs/fase-6-relatorio-conclusao-rodada.md)
+11. [Docs/fase-6-parecer-auditoria-2026-04-08.md](Docs/fase-6-parecer-auditoria-2026-04-08.md)
 
 Documento canônico atual para escopo visual do MVP do dashboard:
 
