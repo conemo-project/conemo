@@ -1,8 +1,10 @@
 # Fechamento da rodada — preparação para Pull Request institucional
 
+**Autor:** Ricardo Ceneviva  
 **Data:** 08/04/2026  
 **Projeto:** CONEMO  
-**Tipo da etapa:** documental e governança (não é nova fase técnica)
+**Tipo da etapa:** documental e governança (não é nova fase técnica)  
+**Parecer de auditoria da etapa:** `Docs/parecer-auditoria-preparacao-pr-2026-04-08.md` (aprovada)
 
 ---
 
