@@ -184,8 +184,8 @@ ubs_metric_rows AS (
 
 city_metric_rows AS (
   SELECT
-    NULL AS health_unit_key,
-    NULL AS ubs_name,
+    CAST(NULL AS STRING) AS health_unit_key,
+    CAST(NULL AS STRING) AS ubs_name,
     pb.ubs_city AS ubs_city,
     'CITY' AS scope_level,
     'ALL' AS journey_type,
@@ -201,8 +201,8 @@ city_metric_rows AS (
 
 global_metric_rows AS (
   SELECT
-    NULL AS health_unit_key,
-    NULL AS ubs_name,
+    CAST(NULL AS STRING) AS health_unit_key,
+    CAST(NULL AS STRING) AS ubs_name,
     'GLOBAL' AS ubs_city,
     'GLOBAL' AS scope_level,
     'ALL' AS journey_type,
@@ -217,8 +217,8 @@ global_metric_rows AS (
   UNION ALL
 
   SELECT
-    NULL,
-    NULL,
+    CAST(NULL AS STRING),
+    CAST(NULL AS STRING),
     'GLOBAL',
     'GLOBAL',
     'ALL',
@@ -239,16 +239,16 @@ global_metric_rows AS (
 
 unavailable_metric_rows AS (
   -- Métricas indisponíveis explicitadas, não omitidas silenciosamente.
-  SELECT NULL AS health_unit_key, NULL AS ubs_name, 'GLOBAL' AS ubs_city, 'GLOBAL' AS scope_level,
+  SELECT CAST(NULL AS STRING) AS health_unit_key, CAST(NULL AS STRING) AS ubs_name, 'GLOBAL' AS ubs_city, 'GLOBAL' AS scope_level,
          'ALL' AS journey_type, 'igi_distribution_global' AS metric_name,
          NULL AS metric_value, NULL AS metric_denominator, NULL AS metric_rate_percent,
          'NA' AS metric_unit, 'INDISPONIVEL' AS metric_status
   UNION ALL
-  SELECT NULL, NULL, 'GLOBAL', 'GLOBAL', 'ALL', 'notifications_global', NULL, NULL, NULL, 'NA', 'INDISPONIVEL'
+  SELECT CAST(NULL AS STRING), CAST(NULL AS STRING), 'GLOBAL', 'GLOBAL', 'ALL', 'notifications_global', NULL, NULL, NULL, 'NA', 'INDISPONIVEL'
   UNION ALL
-  SELECT NULL, NULL, 'GLOBAL', 'GLOBAL', 'ALL', 'chatbot_global', NULL, NULL, NULL, 'NA', 'INDISPONIVEL'
+  SELECT CAST(NULL AS STRING), CAST(NULL AS STRING), 'GLOBAL', 'GLOBAL', 'ALL', 'chatbot_global', NULL, NULL, NULL, 'NA', 'INDISPONIVEL'
   UNION ALL
-  SELECT NULL, NULL, 'GLOBAL', 'GLOBAL', 'ALL', 'help_request_global', NULL, NULL, NULL, 'NA', 'INDISPONIVEL'
+  SELECT CAST(NULL AS STRING), CAST(NULL AS STRING), 'GLOBAL', 'GLOBAL', 'ALL', 'help_request_global', NULL, NULL, NULL, 'NA', 'INDISPONIVEL'
 ),
 
 all_metric_rows AS (
