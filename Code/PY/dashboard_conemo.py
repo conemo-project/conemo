@@ -89,8 +89,18 @@ def load_data() -> pd.DataFrame:
             if isinstance(ca, dict):
                 created_at_seconds = ca.get("_seconds")
 
-            # Verifica flag de teste
-            is_test = data.get("isTest", False)
+            # Verifica flags observáveis de teste/invalidade
+            def as_bool(value):
+                if isinstance(value, bool):
+                    return value
+                if value is None:
+                    return False
+                return str(value).strip().lower() == "true"
+
+            is_test = as_bool(data.get("isTest", False))
+            is_test_user = as_bool(data.get("isTestUser", False))
+            is_invalid = as_bool(data.get("invalid", False))
+            is_test_environment = as_bool(org.get("testEnvironment", False))
 
             return pd.Series(
                 {
@@ -103,6 +113,9 @@ def load_data() -> pd.DataFrame:
                     "user_name": data.get("name", "N/A"),
                     "created_at_seconds": created_at_seconds,
                     "is_test": is_test,
+                    "is_test_user": is_test_user,
+                    "is_invalid": is_invalid,
+                    "is_test_environment": is_test_environment,
                 }
             )
         except Exception:
@@ -117,6 +130,9 @@ def load_data() -> pd.DataFrame:
                     "user_name": "N/A",
                     "created_at_seconds": None,
                     "is_test": False,
+                    "is_test_user": False,
+                    "is_invalid": False,
+                    "is_test_environment": False,
                 }
             )
 
@@ -147,12 +163,20 @@ def load_data() -> pd.DataFrame:
     )
 
     # Aplica o filtro de data (createdAt >= 2026-01-25) e remove testes
-    # 2026-01-25 00:00:00 UTC = 1769308800 segundos
-    CUTOFF_SECONDS = 1769308800
+    # 2026-01-25 00:00:00 UTC = 1769299200 segundos
+    CUTOFF_SECONDS = 1769299200
+    test_city_pattern = r"test|teste|fake|load|carga|break|quebra"
+    has_test_or_invalid_flag = (
+        df["is_test"].fillna(False).astype(bool)
+        | df["is_test_user"].fillna(False).astype(bool)
+        | df["is_invalid"].fillna(False).astype(bool)
+        | df["is_test_environment"].fillna(False).astype(bool)
+        | df["ubs_city"].fillna("").str.lower().str.contains(test_city_pattern, regex=True)
+    )
     df = df[
         df["created_at_seconds"].notna()
         & (df["created_at_seconds"] >= CUTOFF_SECONDS)
-        & (~df["is_test"].fillna(False).astype(bool))
+        & (~has_test_or_invalid_flag)
     ]
 
     # ---------------------------------------------------------------------------
