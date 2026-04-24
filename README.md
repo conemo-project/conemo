@@ -77,13 +77,26 @@ Resumo factual do estado documentado:
 - a fase de configuração inicial do repositório `conemo-project/conemo` foi executada, auditada e formalmente aprovada em 2026-04-06: `.gitignore` robusto e `README.md` institucional criados; repositório privado, limpo e apto para fases posteriores;
 - a **Fase A** (configuração avançada mínima do GitHub) está **formalmente encerrada** como aprovada com ressalvas (auditoria final: 2026-04-06); documentada em [Docs/fase-github-configuracao-avancada.md](Docs/fase-github-configuracao-avancada.md); o projeto está **autorizado a avançar para a Fase B**.
 - a **Fase B** (revisão final documental do plano canônico do dashboard) está **formalmente encerrada** em 2026-04-06: [Docs/Plano-implementacao-dashboard.md](Docs/Plano-implementacao-dashboard.md) consolidado como versão final canônica (V.2.0.0); decisão sobre botão `🔄`, requisito de `timestamp` e separação entre MVP visual / backend-modelagem / fase posterior incorporados; projeto pronto para abertura da Fase C.
-- a **Fase C** (melhorias do dashboard) está **formalmente aberta** em 2026-04-06 para preparação executiva, registrada em [Docs/fase-c-abertura-melhorias-dashboard-conemo.md](Docs/fase-c-abertura-melhorias-dashboard-conemo.md), sem implementação técnica iniciada neste registro.
+- a **Fase C** (melhorias do dashboard) está **formalmente encerrada** em 2026-04-24: integração BigQuery (`firestore_curated`) implementada como fonte funcional primária; contrato do DataFrame preservado; fallback Parquet mantido como segurança técnica; scores PHQ/GAD temporariamente nulos (pendência de saneamento de fonte); PII mantida conforme decisão da coordenação; dashboard não autorizado para uso operacional pleno até validação final da diretoria.
 - a **Fase 6** (qualidade, segurança e handoff) está **formalmente aprovada e encerrada** em 08/04/2026, com parecer em [Docs/fase-6-parecer-auditoria-2026-04-08.md](Docs/fase-6-parecer-auditoria-2026-04-08.md) e relatório em [Docs/fase-6-relatorio-conclusao-rodada.md](Docs/fase-6-relatorio-conclusao-rodada.md);
 - o **Plano Operacional de Pré-processamento de Dados** está **formalmente encerrado** em 08/04/2026, com parecer em [Docs/parecer-encerramento-fase-6-plano-preprocessamento-2026-04-08.md](Docs/parecer-encerramento-fase-6-plano-preprocessamento-2026-04-08.md) e submissão institucional no [PR #2](https://github.com/conemo-project/conemo/pull/2).
 
-Importante:
+---
 
-- propostas e roadmap não devem ser interpretados como cronograma autorizado automático;
+## 5. Fonte de Dados e Canonicidade
+
+Consolidado pós-Fase C:
+
+- **Fonte Canônica:** BigQuery (`firestore_curated`).
+- **Recorte Temporal:** Apenas registros com `createdAt >= 2026-01-25`.
+- **Qualidade:** Exclusão nativa de registros de teste via `is_test_record = false`.
+- **Fallback:** O arquivo Parquet local permanece apenas como fallback técnico temporário para garantir disponibilidade em caso de falha de conexão com o BigQuery.
+- **PII:** Mantidas temporariamente para fins de teste funcional, com anonimização pendente para fase posterior.
+
+---
+
+## 6. Estado atual da frente do dashboard
+
 - avanços para novas fases dependem de aprovação formal prevista no workflow.
 
 ---
