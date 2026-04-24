@@ -51,17 +51,7 @@ def load_data_from_bigquery() -> pd.DataFrame:
     client = bigquery.Client()
     
     query = """
-    WITH phq AS (
-      SELECT participant_master_id, score_value as phq_score
-      FROM `conemo-412202.firestore_curated.cur_score_current_v1`
-      WHERE score_type = 'PHQ'
-    ),
-    gad AS (
-      SELECT participant_master_id, score_value as gad_score
-      FROM `conemo-412202.firestore_curated.cur_score_current_v1`
-      WHERE score_type = 'GAD'
-    ),
-    raw_perfil AS (
+    WITH raw_perfil AS (
       SELECT 
         document_id as source_user_id,
         JSON_EXTRACT_SCALAR(data, '$.name') as user_name,
@@ -80,16 +70,14 @@ def load_data_from_bigquery() -> pd.DataFrame:
       r.user_name,
       r.email,
       CAST(r.birth_seconds AS INT64) as birth_seconds,
-      phq.phq_score,
-      gad.gad_score,
+      CAST(NULL AS FLOAT64) as phq_score, -- Degradado temporariamente por erro na view original
+      CAST(NULL AS FLOAT64) as gad_score, -- Degradado temporariamente por erro na view original
       p.created_at,
       UNIX_SECONDS(p.created_at) as created_at_seconds,
       p.is_test_record
     FROM `conemo-412202.firestore_curated.cur_participant_current_v1` p
     LEFT JOIN `conemo-412202.firestore_curated.cur_session_current_v1` s ON p.participant_master_id = s.participant_master_id
     LEFT JOIN `conemo-412202.firestore_curated.cur_health_unit_v1` u ON p.health_unit_key = u.health_unit_key
-    LEFT JOIN phq ON p.participant_master_id = phq.participant_master_id
-    LEFT JOIN gad ON p.participant_master_id = gad.participant_master_id
     LEFT JOIN raw_perfil r ON p.source_user_id = r.source_user_id
     WHERE p.created_at >= TIMESTAMP('2026-01-25 00:00:00 UTC')
       AND p.is_test_record = false
@@ -137,10 +125,14 @@ def load_data() -> pd.DataFrame:
         df = load_data_from_bigquery()
         st.session_state["data_source"] = "BigQuery (Canônico)"
         st.session_state["last_update"] = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+        st.session_state["bq_success"] = True
+        return df
         
     except Exception as e:
         # Fallback técnico controlado para Parquet
-        st.warning(f"Erro ao acessar BigQuery. Utilizando fallback Parquet local. Erro: {str(e)}")
+        st.session_state["bq_success"] = False
+        st.error(f"⚠️ Falha na fonte canônica (BigQuery). Erro: {str(e)}")
+        st.info("Utilizando fallback temporário: Parquet local (Desatualizado)")
         
         if not os.path.exists(PARQUET_PATH):
             st.error("Falha crítica: nem BigQuery nem Parquet estão disponíveis.")
