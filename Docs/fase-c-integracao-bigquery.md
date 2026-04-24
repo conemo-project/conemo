@@ -69,6 +69,18 @@ A integração foi validada em 2026-04-24 com os seguintes resultados:
 
 ---
 
+## Parecer de Auditoria — Fase C.2 (Revisada)
+**Data:** 2026-04-24  
+**Status:** **APROVADA COMO IMPLEMENTAÇÃO TÉCNICA CONTROLADA**
+
+### Ressalvas Finais:
+1. **Fonte Funcional:** O BigQuery foi comprovado como fonte funcional primária (247 linhas, 125 participantes únicos), sem acionamento do fallback Parquet no teste principal.
+2. **Contrato de Dados:** O contrato do DataFrame foi preservado integralmente.
+3. **Indisponibilidade de Scores:** Os campos `phq_score` e `gad_score` retornam `NULL` temporariamente devido à incompatibilidade de schema na view `cur_score_current_v1`. Esta lacuna deve ser sanada antes da operação plena.
+4. **Não Operacionalidade:** O dashboard permanece em modo de teste técnico e **não está autorizado para uso operacional** até a validação formal da diretoria do CONEMO.
+
+---
+
 ## Decisões Vinculantes da Coordenação
 - **Canonicidade:** O BigQuery é a fonte canônica vigente. O Parquet está desatualizado e não deve ser usado como critério de verdade analítica.
 - **PII:** Nesta etapa técnica as PII necessárias ao contrato atual do dashboard serão mantidas. A anonimização será tratada em fase posterior.
