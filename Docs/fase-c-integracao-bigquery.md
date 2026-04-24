@@ -64,7 +64,7 @@ A integração foi validada em 2026-04-24 com os seguintes resultados:
 - **Filtro flags:** Respeitado (is_test_record = False)
 
 ### Limitações e Bloqueios
-- **Scores Clínicos:** Temporariamente indisponíveis (NULL) via BigQuery até saneamento da view `cur_score_current_v1`.
+- **Scores Clínicos:** Na C.2 revisada, `phq_score` e `gad_score` foram mantidos no contrato do DataFrame, mas retornam NULL temporariamente porque a fonte `cur_score_current_v1` apresentou incompatibilidade de schema. A correção da origem dos scores é pendência da próxima fase ou de fase técnica específica, antes de qualquer validação operacional plena do dashboard.
 - **Dependência Raw:** O cálculo de idade ainda exige parsing de JSON da camada Raw.
 
 ---
