@@ -57,14 +57,15 @@ WHERE p.created_at >= TIMESTAMP('2026-01-25 00:00:00 UTC')
 ```
 
 ### Comprovação Técnica (Execução Real)
-A integração foi validada em 2026-04-24 com os seguintes resultados:
+A integração foi validada em 2026-04-24 com sucesso técnico da leitura BigQuery para o contrato mínimo da C.2, com limitação temporária dos scores PHQ/GAD como nulos. Os resultados foram:
+- **Fonte Ativa no Teste:** BigQuery (Sem acionamento do fallback Parquet).
 - **Linhas retornadas:** 247
 - **Participantes únicos:** 125
 - **Filtro temporal:** Respeitado (Min CreatedAt: 2026-01-28)
 - **Filtro flags:** Respeitado (is_test_record = False)
 
 ### Limitações e Bloqueios
-- **Scores Clínicos:** Na C.2 revisada, `phq_score` e `gad_score` foram mantidos no contrato do DataFrame, mas retornam NULL temporariamente porque a fonte `cur_score_current_v1` apresentou incompatibilidade de schema. A correção da origem dos scores é pendência da próxima fase ou de fase técnica específica, antes de qualquer validação operacional plena do dashboard.
+- **Scores Clínicos:** Na C.2 revisada, `phq_score` e `gad_score` foram mantidos no contrato do DataFrame, mas retornam NULL temporariamente até saneamento da fonte `cur_score_current_v1` ou fase técnica específica. 
 - **Dependência Raw:** O cálculo de idade ainda exige parsing de JSON da camada Raw.
 
 ---
@@ -76,8 +77,8 @@ A integração foi validada em 2026-04-24 com os seguintes resultados:
 ### Ressalvas Finais:
 1. **Fonte Funcional:** O BigQuery foi comprovado como fonte funcional primária (247 linhas, 125 participantes únicos), sem acionamento do fallback Parquet no teste principal.
 2. **Contrato de Dados:** O contrato do DataFrame foi preservado integralmente.
-3. **Indisponibilidade de Scores:** Os campos `phq_score` e `gad_score` retornam `NULL` temporariamente devido à incompatibilidade de schema na view `cur_score_current_v1`. Esta lacuna deve ser sanada antes da operação plena.
-4. **Não Operacionalidade:** O dashboard permanece em modo de teste técnico e **não está autorizado para uso operacional** até a validação formal da diretoria do CONEMO.
+3. **Indisponibilidade de Scores:** Os campos `phq_score` e `gad_score` permanecem no contrato do DataFrame, mas retornam `NULL` temporariamente até saneamento da fonte de scores. Esta lacuna deve ser sanada antes da operação plena.
+4. **Não Operacionalidade:** O dashboard segue não operacional e **não está autorizado para uso operacional** até a validação formal da diretoria do CONEMO.
 
 ---
 
