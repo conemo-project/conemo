@@ -83,6 +83,15 @@ def load_data() -> pd.DataFrame:
                     (today.month, today.day) < (birth.month, birth.day)
                 )
 
+            # Extrai createdAt para Fase B
+            created_at_seconds = None
+            ca = data.get("createdAt")
+            if isinstance(ca, dict):
+                created_at_seconds = ca.get("_seconds")
+
+            # Verifica flag de teste
+            is_test = data.get("isTest", False)
+
             return pd.Series(
                 {
                     "ubs_name": org.get("name", "N/A"),
@@ -92,6 +101,8 @@ def load_data() -> pd.DataFrame:
                     "gender": data.get("gender", "N/A"),
                     "age": age,
                     "user_name": data.get("name", "N/A"),
+                    "created_at_seconds": created_at_seconds,
+                    "is_test": is_test,
                 }
             )
         except Exception:
@@ -104,6 +115,8 @@ def load_data() -> pd.DataFrame:
                     "gender": "N/A",
                     "age": None,
                     "user_name": "N/A",
+                    "created_at_seconds": None,
+                    "is_test": False,
                 }
             )
 
@@ -124,6 +137,23 @@ def load_data() -> pd.DataFrame:
     # os dois filtros: cidade pré-filtra UBS, UBS permanece como pivô operacional.
     # ---------------------------------------------------------------------------
     df["ubs_city"] = df["ubs_city"].str.strip().str.title()
+
+    # ---------------------------------------------------------------------------
+    # Fase B — Robustez: normaliza created_at_seconds para numérico antes do filtro
+    #
+    df["created_at_seconds"] = pd.to_numeric(
+        df["created_at_seconds"],
+        errors="coerce"
+    )
+
+    # Aplica o filtro de data (createdAt >= 2026-01-25) e remove testes
+    # 2026-01-25 00:00:00 UTC = 1769308800 segundos
+    CUTOFF_SECONDS = 1769308800
+    df = df[
+        df["created_at_seconds"].notna()
+        & (df["created_at_seconds"] >= CUTOFF_SECONDS)
+        & (~df["is_test"].fillna(False).astype(bool))
+    ]
 
     # ---------------------------------------------------------------------------
     # P1.1 — Remoção de cidades inválidas ou vazias
@@ -527,6 +557,7 @@ with st.expander("👤 Consulta individual por participante (visão auxiliar)"):
         sessions["Status"] = sessions["isCompleted"].map(
             {True: "Concluída", False: "Não concluída", None: "N/D"}
         ).fillna("N/D")
+        sessions = sessions.dropna(subset=["sessionNumber"])
         sessions["Sessão"] = "Sessão " + sessions["sessionNumber"].astype(int).astype(str)
 
         fig_sess = px.bar(
