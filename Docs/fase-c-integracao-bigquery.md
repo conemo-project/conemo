@@ -168,3 +168,40 @@ Interface íntegra, sidebar correta, tabelas populadas com dados do BigQuery. Me
 ---
 **Executor:** Gemini CLI Agent  
 **Data:** 2026-04-24
+
+---
+
+## Handoff pós-merge — Encerramento da Fase C
+
+**Data de encerramento:** 2026-04-24  
+**PR consolidado:** [PR #4](https://github.com/conemo-project/conemo/pull/4)  
+**Commit de merge:** `b9e5f54` (integrado à branch `main`)  
+**Status final:** ✅ Fase C concluída e integrada à `main`
+
+### Estado final do Dashboard
+- **Fonte Canônica:** BigQuery (dataset `firestore_curated`).
+- **Fallback Técnico:** Parquet local preservado (desatualizado).
+- **Contrato de Dados:** Preservado (DataFrame compatível com visualizações).
+- **Limitação Clínica:** `phq_score` e `gad_score` retornam `NULL` (pendência de saneamento de fonte).
+- **PII:** Mantidas por decisão da coordenação; anonimização pendente.
+- **Operacionalidade:** **NÃO OPERACIONAL**. O dashboard integrado ao BigQuery aguarda validação formal da diretoria do CONEMO.
+
+### Arquivos integrados
+- `Code/PY/dashboard_conemo.py`: Implementação técnica da integração.
+- `Docs/fase-c-integracao-bigquery.md`: Documentação consolidada (C.2, C.3 e Handoff).
+- `Docs/fase-c1-diagnostico-integracao-bigquery-dashboard.md`: Diagnóstico técnico da subfase C.1.
+- `README.md`: Atualização factual do estado do projeto.
+
+### Pendências registradas
+1. **Saneamento de `cur_score_current_v1`**: Necessário para recomposição dos scores clínicos.
+2. **Anonimização**: Segregação de PII em fase posterior.
+3. **Validação Institucional**: Aceite formal pela diretoria do CONEMO.
+4. **Exportações**: Revisão técnica de exportações CSV contendo PII.
+
+### Próximas Fases Recomendadas
+- Fase de Saneamento Clínico (scores).
+- Fase de Segurança e Anonimização.
+- Fase de Validação Final e Operacionalização.
+
+Nenhuma nova fase técnica foi iniciada neste ato.
+
