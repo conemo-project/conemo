@@ -5,6 +5,12 @@ Esta fase documenta a transição do dashboard CONEMO para o BigQuery como fonte
 
 ---
 
+## Fase C.1 — Diagnóstico de integração
+O diagnóstico completo e a matriz de mapeamento Parquet → BigQuery estão registrados no documento:
+`Docs/fase-c1-diagnostico-integracao-bigquery-dashboard.md`
+
+---
+
 ## Fase C.2 — Implementação controlada (Revisada e Corrigida)
 
 ### Objetivo
@@ -18,9 +24,6 @@ Substituir a leitura do Parquet por leitura direta via BigQuery (dataset `firest
     - `conemo-412202.firestore_curated.cur_health_unit_v1`
     - `conemo-412202.firestore_curated.cur_session_current_v1`
 - **Raw (Campos de Perfil):** `conemo-412202.firestore_export.users_raw_latest`
-
-### Arquivos modificados
-- `Code/PY/dashboard_conemo.py`
 
 ### Query BigQuery corrigida
 ```sql
@@ -81,89 +84,66 @@ Confirmar a equivalência funcional da integração BigQuery e decidir o status 
 - Scores PHQ/GAD estão temporariamente nulos.
 - PII mantida por decisão do professor.
 
-### Fonte ativa testada
-**BigQuery** (Dataset `firestore_curated` + `users_raw_latest`). O fallback Parquet permaneceu inativo durante os testes de sucesso.
-
 ### Contagens BigQuery (Snapshot 2026-04-24)
 | Métrica | BigQuery | Parquet histórico/fallback | Interpretação |
 |---|---:|---:|---|
-| Linhas totais | 4857 | ~9000 | BQ reflete apenas dados curados/validados; Parquet continha duplicatas brutas. |
-| Participantes únicos | 481 | 389 | BQ contém o histórico completo; Parquet era um recorte parcial. |
-| Após corte temporal (>= 2026-01-25) | 228 | 135 | Recorte operacional atualizado no BigQuery. |
-| **Consumido pelo dashboard (Limpo)** | **125** | **133** | Diferença de 8 registros devido a critérios de saneamento mais rígidos na camada curada. |
+| Linhas totais | 4857 | ~9000 | BQ reflete histórico curado participante-sessão |
+| Participantes únicos | 481 | 389 | BQ reflete base histórica total |
+| Após corte temporal | 228 | 135 | Recorte operacional pós-2026-01-25 |
+| **Consumido pelo dashboard** | **125** | **133** | **Diferença residual de 8 registros (Saneamento curado mais rígido)** |
 
-### Validação funcional
-- Inicialização: **OK**
-- Carregamento de dados BQ: **OK**
-- Indicador de fonte ativa: **OK**
-- Filtros Cidade/UBS: **OK**
-- Visualizações agregadas: **OK**
-- Comportamento scores NULL: **OK** (Não quebra a UI)
-
-### Validação técnica
+### Validação funcional e técnica
 - Prioridade BigQuery: **OK**
-- Tratamento de erro/fallback: **OK**
-- Ausência de escrita: **OK**
-- Rastreabilidade: **OK**
-
-### Validação de performance
-- Carga inicial (rede): ~6s
-- Carga via Cache: <1s
-- Botão `🔄`: Limpa cache e recarrega em ~6s.
-
-### Cache, botão 🔄 e timestamp
-- `@st.cache_data(ttl=900)` validado.
-- Botão `🔄` preservado e funcional.
-- Timestamp reflete a última consulta bem-sucedida ao BigQuery.
-
-### Fallback Parquet
-O fallback foi testado tecnicamente via indução de erro (C.2) e funciona como rede de segurança. Nesta C.3, o dashboard operou prioritariamente via BigQuery.
-
-### PII mantida
-Mantidos: `user_name`, `email` (mascarado), `age` (via `birthDate`). A anonimização permanece pendente para fase posterior.
-
-### Limitações conhecidas
-- **Scores PHQ/GAD temporariamente nulos:** Devido à incompatibilidade de schema na view `cur_score_current_v1`. Indicadores clínicos aggregados estão indisponíveis.
-
-### Validação visual manual
-Interface íntegra, sidebar correta, tabelas populadas com dados do BigQuery. Mensagem de erro informativa exibida caso a fonte canônica falhe.
+- Fallback Parquet: **Preservado como rede de segurança**
+- Performance (Cache off/on): ~6s / <1s
+- Visualização (Bare Mode): **OK** (Contrato preservado)
 
 ## Decisão recomendada sobre o Parquet
 
 **Recomendação:** **Opção A — manter Parquet como fallback técnico temporário.**
 
 **Justificativa:**
-1. A view de scores clínicos (`cur_score_current_v1`) ainda apresenta erros, tornando o dashboard clinicamente incompleto via BigQuery.
-2. A validação formal pela diretoria do CONEMO ainda não ocorreu.
-3. O fallback garante robustez operacional mínima enquanto as inconsistências de schema no BigQuery são sanadas.
-
-**Condições para futura desativação:**
-1. Saneamento da view `cur_score_current_v1` ou implementação de fonte alternativa de scores.
-2. Validação visual positiva pela diretoria.
-3. Estabilidade comprovada da conexão BigQuery em ambiente de deploy.
-
-**Decisão final:** pendente de aprovação do professor.
+1. A view de scores clínicos (`cur_score_current_v1`) ainda apresenta inconsistências.
+2. A validação formal pela diretoria do CONEMO permanece pendente.
+3. O fallback garante disponibilidade operacional mínima durante a transição.
 
 ---
 
-## Status da Integração BigQuery (C.3)
-- **Canonicidade:** O BigQuery é a fonte canônica vigente. O Parquet está desatualizado e não deve ser usado como critério de verdade analítica.
-- **Fallback:** O Parquet é avaliado apenas como fallback técnico temporário.
-- **PII:** As PII permanecem mantidas nesta fase técnica. A anonimização será tratada em fase posterior.
-- **Operacionalidade:** O dashboard permanece não operacional até validação formal da diretoria do CONEMO.
+# Parecer de auditoria, validação e encerramento — Fase C
 
----
+**Projeto:** CONEMO  
+**Objeto:** Integração do Dashboard CONEMO ao BigQuery  
+**Modo principal:** auditoria e validação  
+**Resultado:** **Fase C aprovada e encerrada com pendências documentadas**
 
-## Parecer de Auditoria — Fase C.3
-**Data:** 2026-04-24  
-**Status:** **CONCLUÍDA — AGUARDANDO DECISÃO DE CORTE**
+## 1. Escopo auditado
+Foi auditada a execução da **Fase C — Integração com BigQuery**, conforme o Plano Operacional da Fase C, abrangendo: diagnóstico (C.1), implementação controlada (C.2) e validação de corte (C.3).
+
+## 2. Validação
+A auditoria final confirmou que a Fase C cumpriu seu objetivo principal: consolidar o **BigQuery como fonte canônica vigente do dashboard**.
+- BigQuery validado como fonte ativa (125 participantes limpos).
+- Parquet rebaixado a fallback técnico temporário.
+- Filtro temporal `2026-01-25` e qualidade `is_test_record = false` preservados.
+- Contrato do DataFrame, cache e botão `🔄` íntegros.
+
+## 3. Ressalvas e pendências
+1. Saneamento da fonte `cur_score_current_v1` para recomposição dos scores PHQ/GAD.
+2. Anonimização ou segregação operacional de PII em fase posterior.
+3. Validação institucional pela diretoria do CONEMO.
+4. Revisão de exportações envolvendo PII.
+
+## 4. Governança e segurança
+A manutenção de PII nesta etapa decorre de decisão explícita do professor para fins técnicos. O dashboard permanece em condição **não operacional**, limitado a validação técnica, até deliberação formal da diretoria.
+
+## 5. Parecer final
+A **Fase C está aprovada e encerrada com pendências documentadas**. A implementação cumpriu o escopo planejado. Fica autorizada a abertura do PR consolidado da Fase C.
 
 ---
 
 ## Decisões Vinculantes da Coordenação
-- **Canonicidade:** O BigQuery é a fonte canônica vigente. O Parquet está desatualizado e não deve ser usado como critério de verdade analítica.
-- **PII:** Nesta etapa técnica as PII necessárias ao contrato atual do dashboard serão mantidas. A anonimização será tratada em fase posterior.
-- **Operacionalidade:** O dashboard integrado ao BigQuery não está autorizado para uso operacional antes da validação formal da diretoria do CONEMO.
+- **Canonicidade:** O BigQuery é a fonte canônica vigente. O Parquet está desatualizado.
+- **PII:** Mantidas nesta fase técnica; anonimização é fase posterior.
+- **Operacionalidade:** Dashboard não autorizado para uso operacional pleno até validação final da diretoria.
 
 ---
 **Executor:** Gemini CLI Agent  
