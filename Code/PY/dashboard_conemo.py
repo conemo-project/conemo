@@ -152,6 +152,52 @@ def load_data_from_bigquery() -> pd.DataFrame:
 
 
 # ---------------------------------------------------------------------------
+# Fase D.4 — Carregamento de Histórico Longitudinal
+# ---------------------------------------------------------------------------
+@st.cache_data(ttl=900)
+def load_history_from_bigquery(participant_id: str) -> pd.DataFrame:
+    """Carrega o histórico completo de PHQ/GAD para um participante específico."""
+    client = bigquery.Client()
+    query = f"""
+    SELECT 
+      instrument,
+      score_total as score,
+      score_timestamp as data_avaliacao,
+      score_source as fonte,
+      source_document_name as path_firestore,
+      ROW_NUMBER() OVER (
+        PARTITION BY instrument 
+        ORDER BY score_timestamp DESC, source_document_id DESC
+      ) as rn
+    FROM `conemo-412202.firestore_curated.cur_score_current_v1`
+    WHERE participant_id = '{participant_id}'
+      AND instrument IN ('PHQ', 'PHQ_JOURNEY', 'GAD', 'GAD_JOURNEY')
+    ORDER BY score_timestamp DESC
+    """
+    try:
+        df_hist = client.query(query).to_dataframe()
+        # Classifica score atual vs histórico
+        df_hist["status_score"] = df_hist["rn"].apply(lambda x: "Atual" if x == 1 else "Histórico")
+        
+        # Tenta extrair sessão/jornada do path do Firestore quando disponível
+        def extract_context(path):
+            if not path or pd.isna(path): return "Vínculo não observável"
+            if "journeys/" in path:
+                # Extrai o ID da jornada ou parte do path para contexto
+                parts = path.split("/")
+                if "sessions" in path:
+                    idx = parts.index("sessions")
+                    return f"Sessão {parts[idx+1]}" if len(parts) > idx+1 else "Jornada"
+                return "Jornada"
+            return "Triagem/Baseline"
+            
+        df_hist["contexto"] = df_hist["path_firestore"].apply(extract_context)
+        return df_hist
+    except Exception:
+        return pd.DataFrame()
+
+
+# ---------------------------------------------------------------------------
 # Carregamento e pré-processamento dos dados (load_data)
 # ---------------------------------------------------------------------------
 @st.cache_data(ttl=900) # Cache de 15 minutos (Fase C.2)
@@ -443,9 +489,9 @@ with st.expander("👤 Consulta individual por participante (visão auxiliar)"):
         p4.metric("Idade", age_str)
         p5.metric("E-mail", email_masked)
 
-        # Scores
+        # Scores Atuais
         st.markdown("---")
-        st.subheader("Scores de Saúde Mental (Baseline)")
+        st.subheader("Scores de Saúde Mental (Representação Atual)")
         phq = row.get("phq_score")
         gad = row.get("gad_score")
         phq_label, gad_label = phq_severity(phq), gad_severity(gad)
@@ -463,7 +509,33 @@ with st.expander("👤 Consulta individual por participante (visão auxiliar)"):
             fig_gad.update_layout(height=280)
             st.plotly_chart(fig_gad, width='stretch')
 
-        # Progresso
+        # Histórico Longitudinal (Fase D.4)
+        st.markdown("---")
+        st.subheader("📜 Histórico Longitudinal PHQ/GAD")
+        
+        # Carrega histórico apenas se estiver em modo BigQuery
+        if st.session_state.get("bq_success", False):
+            df_history = load_history_from_bigquery(selected_id)
+            if not df_history.empty:
+                st.dataframe(
+                    df_history[["instrument", "score", "data_avaliacao", "status_score", "contexto"]].rename(
+                        columns={
+                            "instrument": "Instrumento",
+                            "score": "Score",
+                            "data_avaliacao": "Data da Avaliação",
+                            "status_score": "Status",
+                            "contexto": "Origem/Contexto"
+                        }
+                    ),
+                    width='stretch',
+                    hide_index=True
+                )
+            else:
+                st.info("Nenhum histórico adicional encontrado para este participante.")
+        else:
+            st.info("Histórico longitudinal disponível apenas na conexão BigQuery (Modo Canônico).")
+
+        # Progresso das Sessões
         st.markdown("---")
         st.subheader("Progresso das Sessões")
         sessions = df_user.drop_duplicates(subset="sessionNumber").sort_values("sessionNumber")[["sessionNumber", "isCompleted", "completedDate"]].copy()

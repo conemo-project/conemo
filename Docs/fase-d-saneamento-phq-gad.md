@@ -453,4 +453,54 @@ df["ubs_city"] = df["ubs_city"].fillna("Não respondeu")
 **Data:** 2026-04-26
 
 Esta é uma **nova sessão de trabalho**. Antes de executar qualquer ação, o Agente Executor deve reconstruir o contexto do projeto a partir da documentação, não do histórico do chat.
+
+---
+
+## Fase D.4 — Histórico longitudinal PHQ/GAD por participante
+
+### 1. Objetivo
+Disponibilizar uma visão auxiliar do histórico longitudinal completo de avaliações PHQ-9 e GAD-7 por participante no dashboard, preservando o score mais recente como indicador principal e mantendo o foco em agregação por UBS/Gestão.
+
+### 2. Contexto Decisório
+- **D.3 Corretiva:** Aprovada (Denominador 225 reconciliado).
+- **PR #5:** Liberado para revisão (Isolado desta fase).
+- **Governança:** Foco auxiliar, sem exposição de PII e sem alteração de regras clínicas.
+
+### 3. Escopo Autorizado
+- Carregar histórico completo via `cur_score_current_v1`.
+- Ordenação temporal por `score_timestamp`.
+- Vínculo com sessão/jornada quando observável.
+- Preservação integral dos filtros e lógica da D.3.
+
+### 5. Resultados da Validação Técnica (Checkpoint D.4.3)
+- **Histórico Longitudinal:** Implementada função `load_history_from_bigquery(participant_id)` com cache e ordenação decrescente.
+- **Contexto Operacional:** Lógica de extração de path validada (Triagem vs Jornada vs Sessão).
+- **Integridade do Denominador:** O denominador operacional permanece em **225**, preservando integralmente a correção da D.3.
+- **Privacidade:** Verificado que o `path_firestore` consumido pela query não contém PII (CPF, e-mail, nomes), apenas identificadores técnicos.
+- **Vínculo de Sessão:** Confirmado que o vínculo aparece como "Sessão [ID]" quando disponível no path e "Triagem/Baseline" para registros originários da `users_raw`.
+
+---
+
+### 11. Relatório de Conclusão — Fase D.4
+
+1. **Branch usada:** `fase-d4-historico-longitudinal-phq-gad`.
+2. **Arquivos modificados:** `Code/PY/dashboard_conemo.py`.
+3. **Resumo das alterações:** Adição de seção auxiliar (expander) para histórico de PHQ/GAD com destaque para o score atual e listagem temporal das avaliações anteriores.
+4. **Fonte usada:** `cur_score_current_v1` (Saneada).
+5. **Regra para score atual:** `rn = 1` na partição por instrumento.
+6. **Regra para histórico:** Exibição de todos os registros (`rn >= 1`) ordenados por data decrescente.
+7. **Tratamento de ausência:** Registrado como "Vínculo não observável" para paths nulos ou vazios.
+8. **Preservação da D.3:** Filtro de testes, inclusão de `UNK_UHS` e rotulagem "Não respondeu" mantidos sem alteração.
+9. **Confirmações:**
+    - [x] Histórico aparece em área auxiliar.
+    - [x] Sem alteração em BigQuery.
+    - [x] Sem alteração em regras clínicas.
+    - [x] Sem exposição de PII.
+    - [x] Sem merge/deploy.
+
+**Recomendação:** A Fase D.4 está concluída e validada localmente. O histórico longitudinal fornece a profundidade clínica necessária sem comprometer o foco gerencial do dashboard.
+
+---
+**Executor:** Ricardo Ceneviva  
+**Data:** 2026-04-26
 ...
