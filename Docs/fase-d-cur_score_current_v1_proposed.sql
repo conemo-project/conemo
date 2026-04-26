@@ -1,3 +1,7 @@
+-- Autor: Ricardo Ceneviva
+-- Data: 2026-04-26
+-- Projeto: CONEMO
+
 WITH user_form_scores AS (
   -- Extração de scores de triagem (Baseline) da users_raw_latest
   SELECT

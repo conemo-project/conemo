@@ -73,30 +73,17 @@ Resumo factual do estado documentado:
 - Passo 3 (definição de MVP e backlog) está documentado como completo;
 - Passo 4 (reconciliação do MVP visual) está documentado como aprovado e encerrado após complemento corretivo vinculante em [Docs/passo4-reconciliacao-mvp-visual.md](Docs/passo4-reconciliacao-mvp-visual.md);
 - Fase 5 (frente documental de deliberação) está aprovada e encerrada como fase documental; seus efeitos operacionais permanecem condicionados à deliberação formal da Coordenação.
+- Fase 6 (qualidade, segurança e handoff) está concluída e aprovada com riscos residuais documentados, com encerramento formal da rodada em [Docs/fase-6-relatorio-conclusao-rodada.md](Docs/fase-6-relatorio-conclusao-rodada.md).
 - a frente de setup institucional GitHub está documentada e aprovada em [Docs/github-setup-fase-organizacao-repositorio.md](Docs/github-setup-fase-organizacao-repositorio.md), com a organização `conemo-project` e o repositório privado `conemo` criados com sucesso;
 - a fase de configuração inicial do repositório `conemo-project/conemo` foi executada, auditada e formalmente aprovada em 2026-04-06: `.gitignore` robusto e `README.md` institucional criados; repositório privado, limpo e apto para fases posteriores;
 - a **Fase A** (configuração avançada mínima do GitHub) está **formalmente encerrada** como aprovada com ressalvas (auditoria final: 2026-04-06); documentada em [Docs/fase-github-configuracao-avancada.md](Docs/fase-github-configuracao-avancada.md); o projeto está **autorizado a avançar para a Fase B**.
 - a **Fase B** (revisão final documental do plano canônico do dashboard) está **formalmente encerrada** em 2026-04-06: [Docs/Plano-implementacao-dashboard.md](Docs/Plano-implementacao-dashboard.md) consolidado como versão final canônica (V.2.0.0); decisão sobre botão `🔄`, requisito de `timestamp` e separação entre MVP visual / backend-modelagem / fase posterior incorporados; projeto pronto para abertura da Fase C.
-- a **Fase C** (melhorias do dashboard) está **formalmente encerrada** em 2026-04-24: integração BigQuery (`firestore_curated`) implementada como fonte funcional primária; contrato do DataFrame preservado; fallback Parquet mantido como segurança técnica; scores PHQ/GAD temporariamente nulos (pendência de saneamento de fonte); PII mantida conforme decisão da coordenação; dashboard não autorizado para uso operacional pleno até validação final da diretoria.
-- a **Fase 6** (qualidade, segurança e handoff) está **formalmente aprovada e encerrada** em 08/04/2026, com parecer em [Docs/fase-6-parecer-auditoria-2026-04-08.md](Docs/fase-6-parecer-auditoria-2026-04-08.md) e relatório em [Docs/fase-6-relatorio-conclusao-rodada.md](Docs/fase-6-relatorio-conclusao-rodada.md);
-- o **Plano Operacional de Pré-processamento de Dados** está **formalmente encerrado** em 08/04/2026, com parecer em [Docs/parecer-encerramento-fase-6-plano-preprocessamento-2026-04-08.md](Docs/parecer-encerramento-fase-6-plano-preprocessamento-2026-04-08.md) e submissão institucional no [PR #2](https://github.com/conemo-project/conemo/pull/2).
+- a **Fase C** (melhorias do dashboard) está **formalmente aberta** em 2026-04-06 para preparação executiva, registrada em [Docs/fase-c-abertura-melhorias-dashboard-conemo.md](Docs/fase-c-abertura-melhorias-dashboard-conemo.md), sem implementação técnica iniciada neste registro.
+- a **Fase D.2** (Contrato de dados e correção controlada de `cur_score_current_v1`) foi **formalmente aprovada** em 2026-04-26; view saneada e validada; projeto autorizado a avançar para a **Fase D.3** (Reintegração controlada ao dashboard).
 
----
+Importante:
 
-## 5. Fonte de Dados e Canonicidade
-
-Consolidado pós-Fase C:
-
-- **Fonte Canônica:** BigQuery (`firestore_curated`).
-- **Recorte Temporal:** Apenas registros com `createdAt >= 2026-01-25`.
-- **Qualidade:** Exclusão nativa de registros de teste via `is_test_record = false`.
-- **Fallback:** O arquivo Parquet local permanece apenas como fallback técnico temporário para garantir disponibilidade em caso de falha de conexão com o BigQuery.
-- **PII:** Mantidas temporariamente para fins de teste funcional, com anonimização pendente para fase posterior.
-
----
-
-## 6. Estado atual da frente do dashboard
-
+- propostas e roadmap não devem ser interpretados como cronograma autorizado automático;
 - avanços para novas fases dependem de aprovação formal prevista no workflow.
 
 ---
@@ -129,8 +116,9 @@ Referência canônica para esse enquadramento: [Docs/Plano-implementacao-dashboa
 - **Fase A — Configuração avançada mínima do GitHub**: política mínima de contribuição definida, bloqueio HTTP 403 registrado sem improvisação, auditoria de ajustes aprovada em 2026-04-06 — **fase formalmente encerrada; clearance para Fase B concedido**
 - **Fase B — Revisão final documental do plano canônico**: [Docs/Plano-implementacao-dashboard.md](Docs/Plano-implementacao-dashboard.md) consolidado como V.2.0.0 (versão final canônica), **formalmente encerrado** em auditoria; decisão sobre botão `🔄`, navegação UBS-first e `timestamp` incorporados; projeto pronto para abertura da Fase C
 - **Fase C — Abertura da fase de melhorias do dashboard**: kickoff documental registrado em [Docs/fase-c-abertura-melhorias-dashboard-conemo.md](Docs/fase-c-abertura-melhorias-dashboard-conemo.md); base executiva mantida no plano canônico + complemento do Passo 4; sem início de implementação neste ato
-- **Fase 6 — Qualidade, segurança e handoff**: fase formalmente auditada como **aprovada e encerrada** em 08/04/2026, com saneamento da pendência final de governança/rastreabilidade registrado em [Docs/fase-6-parecer-auditoria-2026-04-08.md](Docs/fase-6-parecer-auditoria-2026-04-08.md)
-- **Encerramento formal da rodada do Plano Operacional de Pré-processamento de Dados**: registrado em 08/04/2026 em [Docs/parecer-encerramento-fase-6-plano-preprocessamento-2026-04-08.md](Docs/parecer-encerramento-fase-6-plano-preprocessamento-2026-04-08.md), com submissão institucional no [PR #2](https://github.com/conemo-project/conemo/pull/2)
+- **Fase D.1 — Diagnóstico da fonte dos scores PHQ/GAD**: concluída e aprovada; diagnóstico de erro de sintaxe na view de scores confirmado.
+- **Fase D.2 — Contrato de dados e correção controlada**: **formalmente aprovada** em 2026-04-26; view `cur_score_current_v1` saneada, retornando 1.402 registros válidos e integridade de chaves preservada; autorizada a Fase D.3.
+- **Fase D.3 — Reintegração controlada dos scores PHQ/GAD ao dashboard**: **formalmente encerrada** em 2026-04-26; dashboard integrado à view saneada via BigQuery; regra determinística de seleção de scores implementada (`ROW_NUMBER()`); PHQ-9 e GAD-7 reintegrados com sucesso (N=125 participantes pós-corte); documentação padronizada com cabeçalho institucional; pronta para abertura de Pull Request.
 
 Observação: esta lista é histórico de execução/documentação, não cronograma automático de próximas fases.
 
@@ -162,9 +150,6 @@ Ordem recomendada de leitura para retomada:
 7. [Docs/github-setup-fase-organizacao-repositorio.md](Docs/github-setup-fase-organizacao-repositorio.md)
 8. [Docs/fase-github-configuracao-avancada.md](Docs/fase-github-configuracao-avancada.md)
 9. [Docs/fase-c-abertura-melhorias-dashboard-conemo.md](Docs/fase-c-abertura-melhorias-dashboard-conemo.md)
-10. [Docs/fase-6-relatorio-conclusao-rodada.md](Docs/fase-6-relatorio-conclusao-rodada.md)
-11. [Docs/fase-6-parecer-auditoria-2026-04-08.md](Docs/fase-6-parecer-auditoria-2026-04-08.md)
-12. [Docs/parecer-encerramento-fase-6-plano-preprocessamento-2026-04-08.md](Docs/parecer-encerramento-fase-6-plano-preprocessamento-2026-04-08.md)
 
 Documento canônico atual para escopo visual do MVP do dashboard:
 

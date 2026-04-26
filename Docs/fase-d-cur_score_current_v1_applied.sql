@@ -1,3 +1,7 @@
+-- Autor: Ricardo Ceneviva
+-- Data: 2026-04-26
+-- Projeto: CONEMO
+
 CREATE OR REPLACE VIEW `conemo-412202.firestore_curated.cur_score_current_v1` AS
 WITH user_form_scores AS (
   -- Extração de scores de triagem (Baseline) da users_raw_latest

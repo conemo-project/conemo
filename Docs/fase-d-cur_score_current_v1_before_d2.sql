@@ -1,3 +1,7 @@
+-- Autor: Ricardo Ceneviva
+-- Data: 2026-04-26
+-- Projeto: CONEMO
+
 Table conemo-412202:firestore_curated.cur_score_current_v1
 
                                              Query                                             
@@ -155,4 +159,3 @@ Table conemo-412202:firestore_curated.cur_score_current_v1
                                                                                                
   FROM scores_with_quality                                                                     
   WHERE participant_master_id IS NOT NULL                                                      
-
