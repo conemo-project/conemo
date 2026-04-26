@@ -44,20 +44,46 @@ def get_update_timestamp() -> str:
 
 
 # ---------------------------------------------------------------------------
-# Fase C.2 — Carregamento via BigQuery
+# Fase C.2 / D.3 — Carregamento via BigQuery
 # ---------------------------------------------------------------------------
 def load_data_from_bigquery() -> pd.DataFrame:
     """Executa consulta controlada no BigQuery preservando o contrato do Dashboard."""
     client = bigquery.Client()
     
+    # Query reintegrando scores PHQ/GAD via cur_score_current_v1 (Fase D.3)
     query = """
     WITH raw_perfil AS (
+      -- Extração de campos demográficos e identificadores da camada RAW
       SELECT 
         document_id as source_user_id,
         JSON_EXTRACT_SCALAR(data, '$.name') as user_name,
         JSON_EXTRACT_SCALAR(data, '$.email') as email,
         JSON_EXTRACT_SCALAR(data, '$.birthDate._seconds') as birth_seconds
       FROM `conemo-412202.firestore_export.users_raw_latest`
+    ),
+    score_ranked AS (
+      -- Etapa 4: Regra determinística para múltiplos scores
+      -- Prioridade: score_timestamp, desempate por source_document_id
+      SELECT 
+        participant_id,
+        instrument,
+        score_total,
+        score_timestamp,
+        ROW_NUMBER() OVER (
+          PARTITION BY participant_id, instrument 
+          ORDER BY score_timestamp DESC, source_document_id DESC
+        ) as rn
+      FROM `conemo-412202.firestore_curated.cur_score_current_v1`
+    ),
+    score_latest AS (
+      -- Etapa 5: Seleção do score atual por instrumento
+      SELECT 
+        participant_id,
+        MAX(CASE WHEN instrument IN ('PHQ', 'PHQ_JOURNEY') THEN score_total END) as phq_score,
+        MAX(CASE WHEN instrument IN ('GAD', 'GAD_JOURNEY') THEN score_total END) as gad_score
+      FROM score_ranked
+      WHERE rn = 1
+      GROUP BY participant_id
     )
     SELECT 
       p.participant_master_id as user_id,
@@ -70,8 +96,8 @@ def load_data_from_bigquery() -> pd.DataFrame:
       r.user_name,
       r.email,
       CAST(r.birth_seconds AS INT64) as birth_seconds,
-      CAST(NULL AS FLOAT64) as phq_score, -- Degradado temporariamente por erro na view original
-      CAST(NULL AS FLOAT64) as gad_score, -- Degradado temporariamente por erro na view original
+      sl.phq_score, -- Reintegrado via cur_score_current_v1 saneada (Fase D.3)
+      sl.gad_score, -- Reintegrado via cur_score_current_v1 saneada (Fase D.3)
       p.created_at,
       UNIX_SECONDS(p.created_at) as created_at_seconds,
       p.is_test_record
@@ -79,6 +105,7 @@ def load_data_from_bigquery() -> pd.DataFrame:
     LEFT JOIN `conemo-412202.firestore_curated.cur_session_current_v1` s ON p.participant_master_id = s.participant_master_id
     LEFT JOIN `conemo-412202.firestore_curated.cur_health_unit_v1` u ON p.health_unit_key = u.health_unit_key
     LEFT JOIN raw_perfil r ON p.source_user_id = r.source_user_id
+    LEFT JOIN score_latest sl ON p.participant_master_id = sl.participant_id
     WHERE p.created_at >= TIMESTAMP('2026-01-25 00:00:00 UTC')
       AND p.is_test_record = false
     """
