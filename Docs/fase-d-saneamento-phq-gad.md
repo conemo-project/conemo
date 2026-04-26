@@ -356,16 +356,18 @@ A matriz abaixo fecha a conta de 228 registros para os 125 atualmente exibidos, 
 
 | Métrica | Definição | Valor | Deve aparecer? | Rótulo recomendado |
 |---|---|---:|---|---|
-| **Usuários pós-corte sem flags** | Válidos (Raw check) | **225** | Sim | Usuários ativos pós-corte |
-| **Cobertura PHQ/GAD (Bruta)** | Total com score real | **128** | Auxiliar | Participantes com scores |
-| **Cobertura PHQ/GAD (Válida)** | Válidos com score real| **125** | Sim | Cobertura PHQ/GAD (Válida) |
-| **Usuários com UBS/cidade identificada** | UBS Real | **122** | Auxiliar | Usuários com UBS identificada |
-| **Usuários com UBS/cidade não identificada**| UNK_UHS | **103** | Qualidade | UBS/Cidade não identificada |
+| **Público-alvo operacional (Denominador)** | Válidos (Post-cutoff, No flags) | **225** | Sim | Usuários ativos pós-corte |
+| **Cobertura PHQ/GAD (Válida)** | Usuários válidos com score real | **125** | Sim | Cobertura PHQ/GAD (Válida) |
+| **Cobertura PHQ/GAD (Bruta)** | Total registros com score real | **128** | Qualidade | Participantes com scores (Bruto) |
+| **Usuários com UBS/cidade identificada** | Válidos em UBS Real | **122** | Auxiliar | Usuários com UBS identificada |
+| **Usuários com UBS/cidade não identificada**| Válidos em UNK_UHS | **103** | Qualidade | UBS/Cidade não identificada |
 
-**Detalhamento da Cobertura (N=128 com score):**
-- Usuários válidos com scores: **125** (122 identificados + 3 `UNK_UHS`).
-- Testes/inválidos com scores: **3** (Todos atualmente no grupo visível).
-- Usuários válidos sem scores: **100** (Todos pertencentes ao grupo `UNK_UHS`).
+**Detalhamento Auditável da Cobertura (N=128 com score):**
+- **Usuários brutos com PHQ/GAD reconciliados:** 128 (Todos os registros post-cutoff com score).
+- **Usuários válidos com PHQ/GAD reconciliados:** 125 (122 exibidos + 3 do grupo `UNK_UHS`).
+- **Usuários teste/inválidos com PHQ/GAD:** 3 (Atualmente exibidos indevidamente no dashboard).
+- **Usuários `UNK_UHS` com PHQ/GAD:** 3 (Registros válidos excluídos por mapeamento).
+- **Usuários válidos sem PHQ/GAD:** 100 (Todos pertencentes ao grupo `UNK_UHS`).
 
 ### 8. Causa raiz revisada
 A perda de **103** usuários válidos deve-se a:
@@ -405,7 +407,50 @@ A implementação só será autorizada se:
 
 ---
 
-## 1. Contexto obrigatório para o Agente Executor
+## Fase D.3 Corretiva — Implementação de Denominadores
+
+### 1. Objetivo
+Executar a correção cirúrgica do denominador do dashboard para incluir usuários válidos sem mapeamento de UBS (`UNK_UHS`) e excluir rigorosamente registros de teste vazados do RAW.
+
+### 2. Implementação Técnica (Code/PY/dashboard_conemo.py)
+
+#### 2.1. Filtro de Testes e Invalidez
+Substituída a lógica excludente de NULLs por uma regra de inclusão de NULLs combinada com exclusão explícita de flags RAW:
+```sql
+WHERE p.created_at >= TIMESTAMP('2026-01-25 00:00:00 UTC')
+  AND (p.is_test_record IS NOT TRUE)
+  AND (r.is_test_raw IS NULL OR r.is_test_raw = 'false')
+  AND (r.is_test_user_raw IS NULL OR r.is_test_user_raw = 'false')
+  AND (r.is_invalid_raw IS NULL OR r.is_invalid_raw = 'false')
+```
+
+#### 2.2. Tratamento de `UNK_UHS`
+Os usuários sem correspondência na tabela de unidades de saúde foram preservados via `LEFT JOIN` e rotulados como categoria de qualidade na camada de transformação do DataFrame:
+```python
+df["ubs_name"] = df["ubs_name"].fillna("Não respondeu")
+df["ubs_city"] = df["ubs_city"].fillna("Não respondeu")
+```
+
+### 3. Resultados Finais Reconciliados (Pós-Implementação)
+
+| Métrica | Valor | Status |
+| :--- | :---: | :--- |
+| **Denominador Operacional Total** | **225** | ✅ Reconciliado com expectativa do Professor. |
+| **Usuários com PHQ/GAD (Cobertura)** | **125** | ✅ Integridade preservada. |
+| **Usuários "Não respondeu" (UNK_UHS)** | **103** | ✅ Recuperados e rotulados. |
+| **Testes/Inválidos Identificados** | **3** | ✅ Excluídos com sucesso (Zero vazamento). |
+
+### 4. Confirmações Finais (Checklist)
+[x] Denominador operacional = 225.
+[x] 103 usuários `UNK_UHS` aparecem como "Não respondeu".
+[x] 3 testes/inválidos foram removidos.
+[x] Usuários sem score permanecem no DataFrame.
+[x] Nenhuma alteração realizada no BigQuery.
+[x] Dashboard permanece não operacional.
+
+---
+**Executor:** Ricardo Ceneviva  
+**Data:** 2026-04-26
 
 Esta é uma **nova sessão de trabalho**. Antes de executar qualquer ação, o Agente Executor deve reconstruir o contexto do projeto a partir da documentação, não do histórico do chat.
 ...
