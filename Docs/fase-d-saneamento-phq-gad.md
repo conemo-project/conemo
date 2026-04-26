@@ -155,36 +155,6 @@ A Fase D.1 foi formalmente aprovada. O diagnóstico confirmou que a view falha d
 ### 7. SQL Aplicada
 A lógica foi implementada usando `REGEXP_EXTRACT` para corrigir o erro de referência da coluna `path_params`. A SQL completa está versionada em `Docs/fase-d-cur_score_current_v1_applied.sql`.
 
-### 8. Resultados dos Testes Pós-Correção
-A view foi validada em 2026-04-24 com os seguintes resultados:
-- **Disponibilidade:** ✅ View consultável sem erros.
-- **Volume de dados:** 1402 registros recuperados (282 usuários únicos).
-- **Integridade de Chaves:** ✅ `participant_id` não nulo em todos os registros.
-- **Faixas Clínicas:**
-    - PHQ: 0.0 a 27.0 (N=282 triagem + 280 jornada)
-    - GAD: 0.0 a 21.0 (N=282 triagem + 279 jornada)
-    - Outros: 0.0 a 28.0 (N=279)
-- **Missing Data:** ✅ Preservado como `NULL` (1 registro detectado).
-
-### 9. Limitações
-- Scores de jornada exigem parsing do `document_name`. Se o path do Firestore mudar, a view precisará de atualização.
-
-### 10. Recomendação para D.3
-Prosseguir para a **Fase D.3 — Reintegração controlada ao dashboard**, substituindo as colunas nulas no Streamlit pela leitura da view `cur_score_current_v1`.
-
-### 11. Confirmações Finais (Checklist)
-[x] D.1 aprovada foi registrada.
-[x] Contrato de dados dos scores foi documentado.
-[x] Definição anterior da view foi salva (`before_d2`).
-[x] Rollback foi documentado.
-[x] SQL proposta foi testada como SELECT antes de alterar a view.
-[x] Apenas `cur_score_current_v1` foi alterada.
-[x] SQL aplicada foi salva.
-[x] View consulta sem erro e retorna dados válidos.
-[x] Nenhum código do dashboard foi alterado.
-[x] Nenhuma regra clínica ou de elegibilidade foi alterada.
-[x] Dashboard segue não operacional.
-
 ---
 
 ## Aprovação Formal da Fase D.2
@@ -361,7 +331,7 @@ A matriz abaixo fecha a conta de 228 registros para os 125 atualmente exibidos, 
 | **Total pós-corte bruto** | **228** | `cur_participant_v1` | Base total da coorte ativa. | Auditado |
 | Testes/invalidos identificados | **3** | `users_raw_latest` | 2 `isTestUser` e 1 `invalid` (identificados no RAW). | Auditado |
 | **Público-alvo operacional esperado** | **225** | Cálculo (228 - 3) | Denominador canônico esperado pelo Professor. | Auditado |
-| Usuários válidos sem UBS/cidade | **103** | `UNK_UHS` + `Join UBS` | Vazamento: usuários válidos mas sem mapeamento. | Auditado |
+| Usuários válidos excluídos (Vazamento) | **103** | `UNK_UHS` + `Join UBS` | Vazamento: usuários válidos mas sem mapeamento. | Auditado |
 | Usuários válidos com UBS/cidade | **122** | Cálculo (225 - 103) | Usuários legítimos visíveis no dashboard. | Auditado |
 | Testes/invalidos incluídos indevidamente | **3** | `is_test_record = false` | Registros do RAW que "vazaram" para o dashboard. | Auditado |
 | **Total exibido no dashboard** | **125** | Dashboard (122 + 3) | Valor atual observado na interface. | Auditado |
@@ -379,38 +349,44 @@ A matriz abaixo fecha a conta de 228 registros para os 125 atualmente exibidos, 
 
 ### 6. Diagnóstico do join com scores
 - O `LEFT JOIN` com scores **não** está filtrando participantes.
-- **Cobertura UNK_UHS (N=103):** 3 possuem scores PHQ/GAD; 100 não possuem scores.
-- **Cobertura Exibidos (N=125):** 125 possuem scores PHQ/GAD (100%).
+- **Cobertura UNK_UHS (N=103):** 3 participantes válidos possuem scores PHQ/GAD; 100 participantes válidos não possuem scores.
+- **Cobertura Exibidos (N=125):** 122 participantes válidos possuem scores; 3 testes/inválidos possuem scores.
 
 ### 7. Separação de denominadores
 
 | Métrica | Definição | Valor | Deve aparecer? | Rótulo recomendado |
 |---|---|---:|---|---|
 | **Usuários pós-corte sem flags** | Válidos (Raw check) | **225** | Sim | Usuários ativos pós-corte |
-| **Usuários com PHQ/GAD reconciliados** | Com score real | **128** | Sim | Cobertura PHQ/GAD |
+| **Cobertura PHQ/GAD (Bruta)** | Total com score real | **128** | Auxiliar | Participantes com scores |
+| **Cobertura PHQ/GAD (Válida)** | Válidos com score real| **125** | Sim | Cobertura PHQ/GAD (Válida) |
 | **Usuários com UBS/cidade identificada** | UBS Real | **122** | Auxiliar | Usuários com UBS identificada |
 | **Usuários com UBS/cidade não identificada**| UNK_UHS | **103** | Qualidade | UBS/Cidade não identificada |
 
+**Detalhamento da Cobertura (N=128 com score):**
+- Usuários válidos com scores: **125** (122 identificados + 3 `UNK_UHS`).
+- Testes/inválidos com scores: **3** (Todos atualmente no grupo visível).
+- Usuários válidos sem scores: **100** (Todos pertencentes ao grupo `UNK_UHS`).
+
 ### 8. Causa raiz revisada
-A perda de 100 usuários válidos deve-se a:
+A perda de **103** usuários válidos deve-se a:
 1.  **Filtro SQL excludente de NULLs:** `is_test_record = false`.
 2.  **Filtro geográfico no Dashboard:** Remoção de registros sem cidade/UBS válida.
 3.  **UBS Desconhecida:** Atribuição maciça ao identificador técnico `UNK_UHS`.
 
 ### 9. Proposta de correção segura, ainda não implementada
-A correção requer uma estratégia de múltiplas camadas, pois `IS NOT TRUE` sozinho reintroduziria os 3 testes/inválidos identificados:
-1.  **Regra de Inclusão:** Permitir `is_test_record` como `false` ou `NULL`.
-2.  **Regra de Exclusão Segura:** Implementar exclusão explícita baseada nas flags RAW (`isTest`, `isTestUser`, `invalid`) ou regra derivada validada.
+A correção requer uma estratégia de múltiplas camadas:
+1.  **Regra de Inclusão:** Permitir `is_test_record` como `false` ou `NULL` para recuperar os 103 válidos de `UNK_UHS`.
+2.  **Regra de Exclusão Segura:** A regra `IS NOT TRUE` sozinha reintroduziria os 3 testes/inválidos identificados. A correção deve combinar a inclusão de NULLs com a exclusão explícita baseada nas flags RAW (`isTest`, `isTestUser`, `invalid`) ou por lista de IDs validados.
 3.  **Mapeamento de Qualidade:** Tratar `UNK_UHS` como categoria de auditoria:
     - Rótulo: **"UBS Não Identificada"**
     - Cidade: **"Cidade Não Identificada"**
-4.  **Preservação:** Manter usuários sem score no denominador operacional total.
+4.  **Preservação:** Manter usuários sem score no denominador operacional total (225), distinguindo-os da métrica de cobertura (125 válidos com score).
 
 ### 10. Critérios para autorizar implementação cirúrgica
 A implementação só será autorizada se:
 1.  A matriz 228 → 225 → 125 permanecer com resíduo zero.
-2.  A regra segura de flags estiver tecnicamente descrita.
-3.  A categoria "Não Identificada" for aceita como item de qualidade de dados.
+2.  O número de 103 usuários `UNK_UHS` for tratado como item de qualidade de dados.
+3.  Os 3 registros teste/invalidade estiverem excluídos com segurança.
 4.  O dashboard permanecer não operacional e sem alterar BigQuery.
 
 ### 11. Itens fora do escopo
@@ -422,7 +398,8 @@ A implementação só será autorizada se:
 ### 12. Confirmações finais
 - [x] Aritmética 228 -> 225 -> 125 reconciliada.
 - [x] Diferença residual é zero.
-- [x] Fontes de teste identificadas no RAW.
+- [x] Frase de perda corrigida para 103 usuários válidos.
+- [x] Tabela de cobertura PHQ/GAD detalhada separando válidos de testes.
 - [x] Proposta de correção segura descrita documentalmente.
 - [x] Nenhuma alteração de código ou BigQuery realizada.
 
@@ -431,8 +408,4 @@ A implementação só será autorizada se:
 ## 1. Contexto obrigatório para o Agente Executor
 
 Esta é uma **nova sessão de trabalho**. Antes de executar qualquer ação, o Agente Executor deve reconstruir o contexto do projeto a partir da documentação, não do histórico do chat.
-
-A base obrigatória é:
-
-1. `Docs/RULES.md`;
 ...
