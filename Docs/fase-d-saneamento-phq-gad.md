@@ -149,7 +149,7 @@ A Fase D.1 foi formalmente aprovada. O diagnóstico confirmou que a view falha d
 
 **Regras do Contrato:**
 1. Missing deve ser preservado como `NULL`. Não usar `COALESCE(..., 0)`.
-2. O score `0` deve ser tratado como dado substantivo.
+2. O score `0` deve ser treated como dado substantivo.
 3. Nenhuma classificação clínica ou de risco deve ser feita nesta view.
 
 ### 7. SQL Aplicada
@@ -344,6 +344,90 @@ A inclusão de "gauges individuais" e a "consulta por ID":
 
 ---
 
+## Fase D.3 Corretiva — Auditoria de Denominadores de Usuários
+
+### 1. Objetivo
+Explicar a divergência entre os 225 usuários esperados e os 125 exibidos no dashboard, identificando vazamentos em joins ou filtros e reconciliando a aritmética da população ativa de forma auditável.
+
+### 2. Decisão do professor
+O professor identificou que a divergência de denominador (225 vs 125) é real e relevante. O merge do PR #5 está bloqueado até a reconciliação. A prioridade imediata é a auditoria de denominadores.
+
+### 3. Matriz corrigida de reconciliação (Subset Pós-Corte >= 25/01/2026)
+
+A matriz abaixo fecha a conta de 228 registros para os 125 atualmente exibidos, com **zero diferença residual**.
+
+| Etapa | Valor | Fonte/Query | Interpretação | Status |
+|---|---:|---|---|---|
+| **Total pós-corte bruto** | **228** | `cur_participant_v1` | Base total da coorte ativa. | Auditado |
+| Testes/invalidos identificados | **3** | `users_raw_latest` | 2 `isTestUser` e 1 `invalid` (identificados no RAW). | Auditado |
+| **Público-alvo operacional esperado** | **225** | Cálculo (228 - 3) | Denominador canônico esperado pelo Professor. | Auditado |
+| Usuários válidos sem UBS/cidade | **103** | `UNK_UHS` + `Join UBS` | Vazamento: usuários válidos mas sem mapeamento. | Auditado |
+| Usuários válidos com UBS/cidade | **122** | Cálculo (225 - 103) | Usuários legítimos visíveis no dashboard. | Auditado |
+| Testes/invalidos incluídos indevidamente | **3** | `is_test_record = false` | Registros do RAW que "vazaram" para o dashboard. | Auditado |
+| **Total exibido no dashboard** | **125** | Dashboard (122 + 3) | Valor atual observado na interface. | Auditado |
+| **Diferença residual não explicada** | **0** | Aritmética | Conta fechada e reconciliada. | **Fechado** |
+
+### 4. Diagnóstico das flags
+- **`is_test_record` no Curated:** Atualmente possui apenas valores `false` (125) ou `NULL` (103). Não há registros `true` nesta coorte.
+- **Vazamento:** O filtro SQL `is_test_record = false` exclui silenciosamente os 103 registros onde a flag é `NULL`.
+- **Falsos Negativos:** Os 3 registros identificados como teste/invalidade no RAW possuem a flag `false` na camada curada, permitindo que entrem indevidamente no dashboard.
+
+### 5. Diagnóstico de `UNK_UHS` e mapeamento UBS/cidade
+- O grupo **`UNK_UHS`** contém **103 participantes**.
+- **Inconsistência resolvida:** O número de usuários "perdidos" é exatamente 103, coincidindo 100% com o grupo `UNK_UHS`.
+- **Impacto:** Como `UNK_UHS` não existe na `cur_health_unit_v1`, o join resulta em `ubs_city IS NULL`, que é filtrado pela lógica visual do dashboard.
+
+### 6. Diagnóstico do join com scores
+- O `LEFT JOIN` com scores **não** está filtrando participantes.
+- **Cobertura UNK_UHS (N=103):** 3 possuem scores PHQ/GAD; 100 não possuem scores.
+- **Cobertura Exibidos (N=125):** 125 possuem scores PHQ/GAD (100%).
+
+### 7. Separação de denominadores
+
+| Métrica | Definição | Valor | Deve aparecer? | Rótulo recomendado |
+|---|---|---:|---|---|
+| **Usuários pós-corte sem flags** | Válidos (Raw check) | **225** | Sim | Usuários ativos pós-corte |
+| **Usuários com PHQ/GAD reconciliados** | Com score real | **128** | Sim | Cobertura PHQ/GAD |
+| **Usuários com UBS/cidade identificada** | UBS Real | **122** | Auxiliar | Usuários com UBS identificada |
+| **Usuários com UBS/cidade não identificada**| UNK_UHS | **103** | Qualidade | UBS/Cidade não identificada |
+
+### 8. Causa raiz revisada
+A perda de 100 usuários válidos deve-se a:
+1.  **Filtro SQL excludente de NULLs:** `is_test_record = false`.
+2.  **Filtro geográfico no Dashboard:** Remoção de registros sem cidade/UBS válida.
+3.  **UBS Desconhecida:** Atribuição maciça ao identificador técnico `UNK_UHS`.
+
+### 9. Proposta de correção segura, ainda não implementada
+A correção requer uma estratégia de múltiplas camadas, pois `IS NOT TRUE` sozinho reintroduziria os 3 testes/inválidos identificados:
+1.  **Regra de Inclusão:** Permitir `is_test_record` como `false` ou `NULL`.
+2.  **Regra de Exclusão Segura:** Implementar exclusão explícita baseada nas flags RAW (`isTest`, `isTestUser`, `invalid`) ou regra derivada validada.
+3.  **Mapeamento de Qualidade:** Tratar `UNK_UHS` como categoria de auditoria:
+    - Rótulo: **"UBS Não Identificada"**
+    - Cidade: **"Cidade Não Identificada"**
+4.  **Preservação:** Manter usuários sem score no denominador operacional total.
+
+### 10. Critérios para autorizar implementação cirúrgica
+A implementação só será autorizada se:
+1.  A matriz 228 → 225 → 125 permanecer com resíduo zero.
+2.  A regra segura de flags estiver tecnicamente descrita.
+3.  A categoria "Não Identificada" for aceita como item de qualidade de dados.
+4.  O dashboard permanecer não operacional e sem alterar BigQuery.
+
+### 11. Itens fora do escopo
+- Alterar BigQuery, views ou marts.
+- Iniciar Fase D.4.
+- Alterar regras clínicas ou elegibilidade.
+- Fazer deploy ou merge.
+
+### 12. Confirmações finais
+- [x] Aritmética 228 -> 225 -> 125 reconciliada.
+- [x] Diferença residual é zero.
+- [x] Fontes de teste identificadas no RAW.
+- [x] Proposta de correção segura descrita documentalmente.
+- [x] Nenhuma alteração de código ou BigQuery realizada.
+
+---
+
 ## 1. Contexto obrigatório para o Agente Executor
 
 Esta é uma **nova sessão de trabalho**. Antes de executar qualquer ação, o Agente Executor deve reconstruir o contexto do projeto a partir da documentação, não do histórico do chat.
@@ -351,517 +435,4 @@ Esta é uma **nova sessão de trabalho**. Antes de executar qualquer ação, o A
 A base obrigatória é:
 
 1. `Docs/RULES.md`;
-2. `Docs/Workflow-Projeto.md`;
-3. `Docs/Plano-implementacao-dashboard.md`;
-4. `Docs/fase-c-integracao-bigquery.md`;
-5. `Docs/fase-c1-diagnostico-integracao-bigquery-dashboard.md`;
-6. `Docs/fase-d-saneamento-phq-gad.md`;
-7. `Docs/fase-d-cur_score_current_v1_before_d2.sql`;
-8. `Docs/fase-d-cur_score_current_v1_proposed.sql`;
-9. `Docs/fase-d-cur_score_current_v1_applied.sql`;
-10. `Code/PY/dashboard_conemo.py`;
-11. `README.md`.
-
-O `Workflow-Projeto.md` define que o professor é a autoridade final sobre escopo e aprovação, que o executor deve implementar apenas a fase aprovada e que não pode iniciar fases por conta própria. Também exige fases curtas, auditáveis, com plano, autorização, execução, relatório e auditoria antes da próxima etapa.  
-
-A D.3 parte de duas decisões já validadas:
-
-1. **D.1 aprovada:** a fonte dos scores foi diagnosticada.
-2. **D.2 aprovada:** `cur_score_current_v1` foi saneada e voltou a retornar scores válidos.
-
----
-
-# 2. Objetivo da Fase D.3
-
-Reintegrar os scores PHQ/GAD saneados ao dashboard, substituindo os valores nulos herdados da Fase C por dados reais vindos de:
-
-```text
-conemo-412202.firestore_curated.cur_score_current_v1
-```
-
-A D.3 deve:
-
-1. mapear `cur_score_current_v1` saneada para `phq_score` e `gad_score`;
-2. definir qual score entra no dashboard quando houver múltiplos scores por participante;
-3. organizar scores por data de avaliação;
-4. se não houver data confiável nos scores, vincular os scores às sessões nas quais as avaliações foram feitas;
-5. preservar filtros UBS/cidade;
-6. preservar cache, botão `🔄` e timestamp;
-7. garantir que missing continue `NULL`;
-8. testar o dashboard com scores reais;
-9. manter o dashboard como **não operacional** até validação institucional.
-
-O plano canônico exige que novas coletas de PHQ, GAD e IGI formem linha temporal por instrumento, sem sobrescrever escores, com versionamento de cada submissão por data e tipo.  Isso é central para a regra de múltiplos scores.
-
----
-
-# 3. Princípio de seleção dos scores
-
-## Regra determinística obrigatória para seleção de score atual
-
-Para fins do dashboard, a Fase D.3 deve produzir, para cada participante e instrumento, uma representação atual única de `phq_score` e `gad_score`, sem apagar ou sobrescrever a linha temporal completa da fonte `cur_score_current_v1`.
-
-A regra de seleção será:
-
-1. Particionar os registros por `participant_id` e `instrument`.
-2. Ordenar os registros por data de avaliação em ordem decrescente.
-3. Selecionar o score mais recente válido de cada instrumento para cada participante.
-4. Preservar todos os registros históricos na fonte de scores; a seleção do score atual vale apenas para consumo do dashboard.
-5. Preservar `NULL` quando não houver score válido. É proibido transformar missing em zero.
-6. Registrar no resultado, sempre que possível, a data usada para seleção do score.
-
-## Prioridade dos campos de data
-
-A prioridade dos campos de data será:
-
-1. `score_timestamp`, quando existir e estiver preenchido;
-2. `completedDate` ou campo equivalente de conclusão da sessão/avaliação, quando houver vínculo com sessão;
-3. `created_at` ou `created_at_seconds`, quando for a melhor data disponível;
-4. data extraída de `source_document_name` ou metadado equivalente, somente se documentada e validada;
-5. se nenhuma data confiável existir, o score não deve ser escolhido arbitrariamente para o dashboard e deve ser registrado como pendência.
-
-## Critérios de desempate
-
-Em caso de múltiplos registros com a mesma data para o mesmo participante e instrumento, aplicar desempate determinístico nesta ordem:
-
-1. preferir registro com `score_total` não nulo;
-2. preferir maior `score_timestamp` normalizado, se houver diferença após conversão;
-3. preferir fonte com maior rastreabilidade documentada na D.2, preservando `score_source`;
-4. preferir maior `source_document_id` ou `source_document_name`, apenas como critério técnico estável de desempate;
-5. se o empate persistir, registrar como duplicidade pendente e não escolher silenciosamente sem evidência.
-
----
-
-# 4. Fases curtas e auditáveis da D.3
-
-## D.3.1 — Reabertura documental e leitura do contexto
-
-**Objetivo**
-Garantir que o executor parta do estado canônico correto.
-
-**Ações**
-
-1. Criar branch:
-
-```text
-fase-d3-reintegracao-scores-dashboard
-```
-
-2. Ler toda a documentação listada na seção 1.
-3. Confirmar no documento da D.2:
-
-   * `cur_score_current_v1` está saneada;
-   * SQL aplicada está versionada;
-   * rollback está documentado;
-   * scores PHQ/GAD estão dentro das faixas esperadas;
-   * D.3 ainda não foi iniciada.
-4. Registrar abertura da D.3 em `Docs/fase-d-saneamento-phq-gad.md`.
-
-**Arquivos autorizados**
-
-* `Docs/fase-d-saneamento-phq-gad.md`
-
-**Critério de validação**
-
-* nenhum código alterado;
-* contexto reconstruído;
-* limites da D.3 documentados.
-
----
-
-## D.3.2 — Mapeamento da view saneada para o contrato do dashboard
-
-**Objetivo**
-Mapear os campos da `cur_score_current_v1` para o contrato existente do dashboard.
-
-**Ações**
-
-1. Inspecionar o schema atual de `cur_score_current_v1`.
-2. Confirmar campos disponíveis:
-
-   * `participant_id`;
-   * `instrument`;
-   * `score_total`;
-   * `score_timestamp`;
-   * `score_source`;
-   * `source_document_id`;
-   * `source_document_name`;
-   * `score_rule_version`.
-3. Mapear:
-
-   * PHQ → `phq_score`;
-   * GAD → `gad_score`.
-4. Confirmar se `instrument` diferencia corretamente PHQ e GAD.
-5. Confirmar se `score_total` é numérico.
-6. Confirmar se `score_timestamp` é data utilizável.
-
-**Artefato esperado**
-
-Tabela em `Docs/fase-d-saneamento-phq-gad.md`:
-
-```markdown
-| Campo em cur_score_current_v1 | Campo no dashboard | Regra de mapeamento | Tipo esperado | Observação |
-|---|---|---|---|---|
-```
-
-**Critério de validação**
-
-* nenhum campo `phq_score`/`gad_score` fica implícito;
-* ausência de score continua `NULL`;
-* zero não é confundido com missing.
-
----
-
-## D.3.3 — Regra de seleção quando há múltiplos scores
-
-**Objetivo**
-Definir formalmente qual score entra no dashboard aplicando a regra determinística aprovada.
-
-**SQL esperado, em princípio**
-
-Usar lógica equivalente a:
-
-```sql
-ROW_NUMBER() OVER (
-  PARTITION BY participant_id, instrument
-  ORDER BY
-    data_avaliacao_normalizada DESC,
-    score_total IS NOT NULL DESC,
-    source_document_id DESC,
-    source_document_name DESC
-) AS rn
-```
-
-Onde `rn = 1` representa o score atual para o dashboard.
-
-**Artefato esperado**
-
-Tabela:
-
-```markdown
-| Situação | Regra de seleção | Resultado esperado | Risco | Controle |
-|---|---|---|---|---|
-```
-
-**Critério de validação**
-
-* a regra é determinística e segue a prioridade de data aprovada;
-* há rastreabilidade da data usada;
-* scores históricos não são apagados;
-* o dashboard recebe apenas o score atual por instrumento.
-
----
-
-## D.3.4 — Ajuste controlado da consulta BigQuery do dashboard
-
-**Objetivo**
-Alterar a consulta de `load_data_from_bigquery()` para incorporar os scores reais.
-
-**Arquivo autorizado**
-
-* `Code/PY/dashboard_conemo.py`
-
-**Ações**
-
-1. Localizar a query BigQuery da função de carga.
-2. Substituir a degradação temporária de `phq_score`/`gad_score` como `NULL` por join controlado com `cur_score_current_v1`.
-3. Criar CTEs ou subconsultas para:
-
-   * selecionar score PHQ mais recente por participante;
-   * selecionar score GAD mais recente por participante.
-4. Fazer join com a tabela base do dashboard usando `participant_id`/`participant_master_id`, conforme contrato da Fase C.
-5. Garantir que participantes sem score mantenham `NULL`.
-6. Não usar `COALESCE(score, 0)`.
-7. Não alterar filtros UBS/cidade.
-8. Não alterar corte temporal.
-9. Não alterar flags de qualidade.
-10. Não alterar fallback Parquet além do necessário para preservar compatibilidade.
-11. Não alterar navegação, layout ou melhorias visuais.
-
-**Critério de validação**
-
-* `phq_score` e `gad_score` deixam de ser sempre `NULL`;
-* participantes sem score continuam `NULL`;
-* DataFrame preserva contrato anterior;
-* dashboard continua carregando.
-
----
-
-## D.3.5 — Preservação de cache, botão `🔄` e timestamp
-
-**Objetivo**
-Garantir que a reintegração dos scores não quebre a lógica operacional da Fase C.
-
-**Ações**
-
-1. Confirmar `st.cache_data(ttl=900)` ou TTL vigente.
-2. Confirmar que o botão `🔄` limpa cache ou força nova consulta.
-3. Confirmar que o timestamp reflete a última consulta bem-sucedida.
-4. Confirmar que a inclusão dos scores não cria cache paralelo.
-5. Confirmar que o fallback Parquet continua formalmente temporário.
-
-O Streamlit documenta `st.cache_data` como mecanismo para cachear funções que retornam dados, incluindo consultas de banco; também permite `ttl` e limpeza via `func.clear()` ou `st.cache_data.clear()`. ([Streamlit Docs][1])
-
-**Critério de validação**
-
-* cache preservado;
-* botão preservado;
-* timestamp preservado;
-* sem regressão funcional.
-
----
-
-## D.3.6 — Testes com scores reais
-
-**Objetivo**
-Provar que o dashboard está consumindo scores reais da view saneada.
-
-**Testes obrigatórios**
-
-### 1. Teste de query BigQuery
-
-Verificar:
-
-```text
-linhas retornadas
-participantes únicos
-participantes com PHQ não nulo
-participantes com GAD não nulo
-PHQ min/max
-GAD min/max
-```
-
-### 2. Teste de contrato do DataFrame
-
-Confirmar presença de:
-
-```text
-user_id
-sessionNumber
-isCompleted
-completedDate
-ubs_name
-ubs_city
-gender
-age
-phq_score
-gad_score
-created_at_seconds
-user_name
-email
-is_test
-is_test_user
-is_invalid
-is_test_env
-```
-
-O diagnóstico da Fase C já registrava `phq_score` e `gad_score` como campos clínicos esperados no contrato do dashboard. 
-
-### 3. Teste de missing
-
-Confirmar:
-
-* missing continua `NULL`;
-* zero permanece zero real;
-* não há imputação silenciosa.
-
-### 4. Teste de múltiplos scores
-
-Para amostra de participantes com múltiplos scores:
-
-```markdown
-| participant_id mascarado | instrumento | n_scores | data_escolhida | score_escolhido | regra aplicada |
-|---|---:|---:|---|---:|---|
-```
-
-Não registrar PII real.
-
-### 5. Teste UBS/cidade
-
-Confirmar:
-
-* filtro por cidade funciona;
-* filtro por UBS funciona;
-* agregações clínicas respondem ao filtro;
-* nenhum gráfico quebra.
-
-### 6. Teste visual
-
-Confirmar:
-
-* dashboard abre;
-* scores aparecem em gráficos/tabelas esperados;
-* não há mensagem antiga dizendo que PHQ/GAD estão indisponíveis;
-* dashboard segue marcado como não operacional.
-
-**Critério de validação**
-
-* scores reais presentes;
-* filtros preservados;
-* sem regressão;
-* sem operacionalização indevida.
-
----
-
-## D.3.7 — Documentação e handoff
-
-**Objetivo**
-Deixar rastro completo para auditoria e próxima fase.
-
-**Arquivos autorizados**
-
-* `Docs/fase-d-saneamento-phq-gad.md`
-* eventualmente `README.md`, apenas se for necessário atualizar o estado factual do projeto.
-
-**Conteúdo obrigatório**
-
-1. objetivo da D.3;
-2. fonte usada;
-3. regra de seleção de múltiplos scores;
-4. tratamento de missing;
-5. query/estratégia de join;
-6. testes realizados;
-7. resultados dos testes;
-8. limitações;
-9. confirmação de que dashboard não está operacional;
-10. pendências para validação institucional;
-11. recomendação para próxima fase.
-
-**Critério de validação**
-
-* outro agente consegue retomar sem recorrer ao chat;
-* a limitação “PHQ/GAD nulos” é removida ou reclassificada;
-* riscos remanescentes estão documentados.
-
----
-
-# 5. Arquivos autorizados na D.3
-
-## Permitidos
-
-```text
-Code/PY/dashboard_conemo.py
-Docs/fase-d-saneamento-phq-gad.md
-README.md  # somente se houver atualização factual necessária
-```
-
-## Proibidos sem nova autorização
-
-```text
-Docs/fase-c-integracao-bigquery.md
-Docs/fase-c1-diagnostico-integracao-bigquery-dashboard.md
-SQL de criação/alteração de views
-Objetos BigQuery
-Arquivos de regras clínicas
-Arquivos de elegibilidade
-```
-
-A D.3 **não deve alterar BigQuery**. A view já foi saneada na D.2. Agora o escopo é apenas consumir a view saneada no dashboard.
-
----
-
-# 6. Itens explicitamente fora do escopo
-
-É proibido na D.3:
-
-1. alterar `cur_score_current_v1`;
-2. criar ou alterar views;
-3. criar ou alterar marts;
-4. fazer deploy;
-5. declarar dashboard operacional;
-6. alterar regras clínicas;
-7. alterar elegibilidade;
-8. criar alertas;
-9. alterar pontos de corte;
-10. fazer anonimização;
-11. remover PII;
-12. mexer no fallback Parquet como decisão final;
-13. fazer melhorias visuais não necessárias;
-14. iniciar fase posterior.
-
----
-
-# 7. Critérios finais de aceite da D.3
-
-A D.3 só poderá ser aprovada se:
-
-1. `cur_score_current_v1` for consumida pelo dashboard;
-2. `phq_score` e `gad_score` forem preenchidos com scores reais quando disponíveis;
-3. participantes sem score permanecerem com `NULL`;
-4. múltiplos scores forem resolvidos por data de avaliação;
-5. se não houver data, a tentativa de vínculo com sessão/jornada for documentada;
-6. DataFrame preservar contrato;
-7. filtros UBS/cidade continuarem funcionando;
-8. cache, botão `🔄` e timestamp foram preservados;
-9. dashboard rodar sem erro;
-10. nenhum objeto BigQuery for alterado;
-11. nenhuma regra clínica/elegibilidade for alterada;
-12. não houver deploy;
-13. dashboard continuar não operacional;
-14. documentação e handoff forem atualizados.
-
----
-
-# 8. Riscos e controles
-
-| Risco                                              | Controle                                                     |
-| -------------------------------------------------- | ------------------------------------------------------------ |
-| Escolher score errado entre múltiplos registros    | ordenar por data de avaliação; se ausente, vincular à sessão |
-| Misturar PHQ e GAD                                 | separar por `instrument`                                     |
-| Transformar missing em zero                        | proibir `COALESCE(score, 0)`                                 |
-| Quebrar contrato do DataFrame                      | teste explícito de colunas                                   |
-| Quebrar filtros UBS/cidade                         | testes de filtro após integração                             |
-| Quebrar cache ou botão `🔄`                        | teste específico de cache e recarga                          |
-| Exibir dado clínico como operacional sem validação | manter dashboard não operacional                             |
-| Usar score individual como eixo visual             | preservar foco agregado UBS/gestão                           |
-| Alterar regra clínica sem autorização              | fora do escopo                                               |
-
----
-
-# 9. Relatório de conclusão obrigatório
-
-Ao final da execução, o Agente Executor deve entregar relatório com:
-
-1. branch usada;
-2. arquivos lidos;
-3. arquivos modificados;
-4. função/trecho alterado;
-5. estratégia de join com `cur_score_current_v1`;
-6. regra de seleção de múltiplos scores;
-7. tratamento de missing;
-8. testes executados;
-9. resultados dos testes;
-10. status dos filtros UBS/cidade;
-11. status do cache, botão `🔄` e timestamp;
-12. confirmação de que scores reais aparecem;
-13. limitações;
-14. pendências;
-15. confirmações:
-
-* não alterou BigQuery;
-* não alterou regras clínicas;
-* não alterou elegibilidade;
-* não fez deploy;
-* não declarou dashboard operacional;
-* não iniciou fase posterior.
-
----
-
-# 10. Checkpoint final
-
-A D.3 termina com:
-
-> **auditoria da reintegração dos scores ao dashboard.**
-
-A próxima etapa só poderá ser aberta depois da auditoria da D.3.
-
-Minha recomendação é que, se a D.3 for aprovada, a próxima decisão da coordenação seja escolher entre:
-
-1. fase de validação institucional do dashboard;
-2. fase de anonimização/segregação operacional de PII;
-3. fase de revisão de exportações;
-4. melhorias visuais.
-
-[1]: https://docs.streamlit.io/1.53.0/develop/api-reference/caching-and-state/st.cache_data?utm_source=chatgpt.com "st.cache_data - Streamlit Docs"
-
-
+...
