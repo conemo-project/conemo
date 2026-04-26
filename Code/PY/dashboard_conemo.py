@@ -51,14 +51,20 @@ def load_data_from_bigquery() -> pd.DataFrame:
     client = bigquery.Client()
     
     # Query reintegrando scores PHQ/GAD via cur_score_current_v1 (Fase D.3)
+    # Correção D.3 Corretiva: Ajuste de denominador para incluir UNK_UHS (válidos) 
+    # e excluir rigorosamente testes do RAW.
     query = """
     WITH raw_perfil AS (
       -- Extração de campos demográficos e identificadores da camada RAW
+      -- Adição de flags de teste do RAW para exclusão segura (D.3 Corretiva)
       SELECT 
         document_id as source_user_id,
         JSON_EXTRACT_SCALAR(data, '$.name') as user_name,
         JSON_EXTRACT_SCALAR(data, '$.email') as email,
-        JSON_EXTRACT_SCALAR(data, '$.birthDate._seconds') as birth_seconds
+        JSON_EXTRACT_SCALAR(data, '$.birthDate._seconds') as birth_seconds,
+        JSON_EXTRACT_SCALAR(data, '$.isTest') as is_test_raw,
+        JSON_EXTRACT_SCALAR(data, '$.isTestUser') as is_test_user_raw,
+        JSON_EXTRACT_SCALAR(data, '$.invalid') as is_invalid_raw
       FROM `conemo-412202.firestore_export.users_raw_latest`
     ),
     score_ranked AS (
@@ -107,7 +113,11 @@ def load_data_from_bigquery() -> pd.DataFrame:
     LEFT JOIN raw_perfil r ON p.source_user_id = r.source_user_id
     LEFT JOIN score_latest sl ON p.participant_master_id = sl.participant_id
     WHERE p.created_at >= TIMESTAMP('2026-01-25 00:00:00 UTC')
-      AND p.is_test_record = false
+      -- Regra Segura D.3 Corretiva: Inclui NULLs (válidos), exclui testes explícitos do Curated e do RAW
+      AND (p.is_test_record IS NOT TRUE)
+      AND (r.is_test_raw IS NULL OR r.is_test_raw = 'false')
+      AND (r.is_test_user_raw IS NULL OR r.is_test_user_raw = 'false')
+      AND (r.is_invalid_raw IS NULL OR r.is_invalid_raw = 'false')
     """
     
     df = client.query(query).to_dataframe()
@@ -125,9 +135,9 @@ def load_data_from_bigquery() -> pd.DataFrame:
 
     df["age"] = df["birth_seconds"].apply(calculate_age)
     
-    # Preenchimento de nulos para conformidade com o Dashboard
-    df["ubs_name"] = df["ubs_name"].fillna("N/A")
-    df["ubs_city"] = df["ubs_city"].fillna("N/A")
+    # Preenchimento de nulos (D.3 Corretiva: Rotula UNK_UHS como "Não respondeu")
+    df["ubs_name"] = df["ubs_name"].fillna("Não respondeu")
+    df["ubs_city"] = df["ubs_city"].fillna("Não respondeu")
     df["user_name"] = df["user_name"].fillna("N/A")
     df["email"] = df["email"].fillna("N/D")
     df["gender"] = df["gender"].fillna("N/A")
@@ -190,8 +200,8 @@ def load_data() -> pd.DataFrame:
                 birth_seconds = bd.get("_seconds") if isinstance(bd, dict) else None
                 
                 return pd.Series({
-                    "ubs_name": org.get("name", "N/A"),
-                    "ubs_city": org.get("city", "N/A"),
+                    "ubs_name": org.get("name", "Não respondeu"),
+                    "ubs_city": org.get("city", "Não respondeu"),
                     "phq_score": phq,
                     "gad_score": gad,
                     "gender": data.get("gender", "N/A"),
@@ -204,7 +214,7 @@ def load_data() -> pd.DataFrame:
                     "is_test_environment": bool(org.get("testEnvironment", False)),
                 })
             except Exception:
-                return pd.Series({"ubs_name": "N/A", "ubs_city": "N/A", "phq_score": None, "gad_score": None, 
+                return pd.Series({"ubs_name": "Não respondeu", "ubs_city": "Não respondeu", "phq_score": None, "gad_score": None, 
                                  "gender": "N/A", "user_name": "N/A", "birth_seconds": None, "created_at_seconds": None,
                                  "is_test": False, "is_test_user": False, "is_invalid": False, "is_test_environment": False})
 
