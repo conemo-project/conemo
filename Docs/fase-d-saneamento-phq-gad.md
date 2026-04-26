@@ -501,6 +501,19 @@ Disponibilizar uma visão auxiliar do histórico longitudinal completo de avalia
 **Recomendação:** A Fase D.4 está concluída e validada localmente. O histórico longitudinal fornece a profundidade clínica necessária sem comprometer o foco gerencial do dashboard.
 
 ---
-**Executor:** Ricardo Ceneviva  
-**Data:** 2026-04-26
+
+### 12. Fechamento Documental — Fase D.4
+
+Este registro encerra a Fase D.4, consolidando os seguintes pontos de governança e integridade técnica:
+
+1.  **Natureza Auxiliar:** O histórico longitudinal PHQ/GAD foi implementado como um componente auxiliar, residindo exclusivamente dentro de um `expander` de consulta individual. O eixo principal do dashboard permanece inalterado, com foco em agregação por UBS e Gestão de Projeto.
+2.  **Integridade do Dado:** A regra técnica `rn=1` (Row Number) é aplicada estritamente como lógica visual/de leitura para identificar a representação atual do score no dashboard. Não houve sobrescrita, deleção ou alteração de registros históricos na fonte `cur_score_current_v1`.
+3.  **Observabilidade:** A ausência de vínculo explícito com sessão ou jornada em determinados registros é tratada como uma **limitação de observabilidade dos metadados**, não constituindo erro de processamento ou falha de sistema.
+4.  **Preservação de Regras:** Confirma-se que **nenhuma regra clínica**, regra de elegibilidade ou motor de alertas foi modificado durante esta fase. A implementação limitou-se à camada de visualização (reporting layer).
+5.  **Status de Governança:** O merge para a branch `main` e qualquer forma de deploy permanecem **bloqueados** até auditoria final e autorização formal da coordenação. O dashboard permanece **NÃO OPERACIONAL**.
+
+---
+**Autor:** Ricardo Ceneviva  
+**Data:** 2026-04-26  
+**Projeto:** CONEMO
 ...
