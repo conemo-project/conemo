@@ -44,23 +44,56 @@ def get_update_timestamp() -> str:
 
 
 # ---------------------------------------------------------------------------
-# Fase C.2 — Carregamento via BigQuery
+# Fase C.2 / D.3 — Carregamento via BigQuery
 # ---------------------------------------------------------------------------
 def load_data_from_bigquery() -> pd.DataFrame:
     """Executa consulta controlada no BigQuery preservando o contrato do Dashboard."""
     client = bigquery.Client()
     
+    # Query reintegrando scores PHQ/GAD via cur_score_current_v1 (Fase D.3)
+    # Correção D.3 Corretiva: Ajuste de denominador para incluir UNK_UHS (válidos) 
+    # e excluir rigorosamente testes do RAW.
     query = """
     WITH raw_perfil AS (
+      -- Extração de campos demográficos e identificadores da camada RAW
+      -- Adição de flags de teste do RAW para exclusão segura (D.3 Corretiva)
       SELECT 
         document_id as source_user_id,
         JSON_EXTRACT_SCALAR(data, '$.name') as user_name,
         JSON_EXTRACT_SCALAR(data, '$.email') as email,
-        JSON_EXTRACT_SCALAR(data, '$.birthDate._seconds') as birth_seconds
+        JSON_EXTRACT_SCALAR(data, '$.birthDate._seconds') as birth_seconds,
+        JSON_EXTRACT_SCALAR(data, '$.isTest') as is_test_raw,
+        JSON_EXTRACT_SCALAR(data, '$.isTestUser') as is_test_user_raw,
+        JSON_EXTRACT_SCALAR(data, '$.invalid') as is_invalid_raw
       FROM `conemo-412202.firestore_export.users_raw_latest`
+    ),
+    score_ranked AS (
+      -- Etapa 4: Regra determinística para múltiplos scores
+      -- Prioridade: score_timestamp, desempate por source_document_id
+      SELECT 
+        participant_id,
+        instrument,
+        score_total,
+        score_timestamp,
+        ROW_NUMBER() OVER (
+          PARTITION BY participant_id, instrument 
+          ORDER BY score_timestamp DESC, source_document_id DESC
+        ) as rn
+      FROM `conemo-412202.firestore_curated.cur_score_current_v1`
+    ),
+    score_latest AS (
+      -- Etapa 5: Seleção do score atual por instrumento
+      SELECT 
+        participant_id,
+        MAX(CASE WHEN instrument IN ('PHQ', 'PHQ_JOURNEY') THEN score_total END) as phq_score,
+        MAX(CASE WHEN instrument IN ('GAD', 'GAD_JOURNEY') THEN score_total END) as gad_score
+      FROM score_ranked
+      WHERE rn = 1
+      GROUP BY participant_id
     )
     SELECT 
       p.participant_master_id as user_id,
+            p.health_unit_key,
       s.session_number as sessionNumber,
       s.is_completed as isCompleted,
       CAST(s.event_timestamp AS STRING) as completedDate,
@@ -70,8 +103,8 @@ def load_data_from_bigquery() -> pd.DataFrame:
       r.user_name,
       r.email,
       CAST(r.birth_seconds AS INT64) as birth_seconds,
-      CAST(NULL AS FLOAT64) as phq_score, -- Degradado temporariamente por erro na view original
-      CAST(NULL AS FLOAT64) as gad_score, -- Degradado temporariamente por erro na view original
+      sl.phq_score, -- Reintegrado via cur_score_current_v1 saneada (Fase D.3)
+      sl.gad_score, -- Reintegrado via cur_score_current_v1 saneada (Fase D.3)
       p.created_at,
       UNIX_SECONDS(p.created_at) as created_at_seconds,
       p.is_test_record
@@ -79,8 +112,13 @@ def load_data_from_bigquery() -> pd.DataFrame:
     LEFT JOIN `conemo-412202.firestore_curated.cur_session_current_v1` s ON p.participant_master_id = s.participant_master_id
     LEFT JOIN `conemo-412202.firestore_curated.cur_health_unit_v1` u ON p.health_unit_key = u.health_unit_key
     LEFT JOIN raw_perfil r ON p.source_user_id = r.source_user_id
+    LEFT JOIN score_latest sl ON p.participant_master_id = sl.participant_id
     WHERE p.created_at >= TIMESTAMP('2026-01-25 00:00:00 UTC')
-      AND p.is_test_record = false
+      -- Regra Segura D.3 Corretiva: Inclui NULLs (válidos), exclui testes explícitos do Curated e do RAW
+      AND (p.is_test_record IS NOT TRUE)
+      AND (r.is_test_raw IS NULL OR r.is_test_raw = 'false')
+      AND (r.is_test_user_raw IS NULL OR r.is_test_user_raw = 'false')
+      AND (r.is_invalid_raw IS NULL OR r.is_invalid_raw = 'false')
     """
     
     df = client.query(query).to_dataframe()
@@ -98,9 +136,9 @@ def load_data_from_bigquery() -> pd.DataFrame:
 
     df["age"] = df["birth_seconds"].apply(calculate_age)
     
-    # Preenchimento de nulos para conformidade com o Dashboard
-    df["ubs_name"] = df["ubs_name"].fillna("N/A")
-    df["ubs_city"] = df["ubs_city"].fillna("N/A")
+    # Preenchimento de nulos (D.3 Corretiva: Rotula UNK_UHS como "Não respondeu")
+    df["ubs_name"] = df["ubs_name"].fillna("Não respondeu")
+    df["ubs_city"] = df["ubs_city"].fillna("Não respondeu")
     df["user_name"] = df["user_name"].fillna("N/A")
     df["email"] = df["email"].fillna("N/D")
     df["gender"] = df["gender"].fillna("N/A")
@@ -111,6 +149,119 @@ def load_data_from_bigquery() -> pd.DataFrame:
     df["is_invalid"] = False
     df["is_test_environment"] = False
     
+    return df
+
+
+# ---------------------------------------------------------------------------
+# Fase D.4 — Carregamento de Histórico Longitudinal
+# ---------------------------------------------------------------------------
+@st.cache_data(ttl=900)
+def load_history_from_bigquery(participant_id: str) -> pd.DataFrame:
+    """Carrega o histórico completo de PHQ/GAD para um participante específico."""
+    client = bigquery.Client()
+    query = f"""
+    SELECT 
+      instrument,
+      score_total as score,
+      score_timestamp as data_avaliacao,
+      score_source as fonte,
+      source_document_name as path_firestore,
+      ROW_NUMBER() OVER (
+        PARTITION BY instrument 
+        ORDER BY score_timestamp DESC, source_document_id DESC
+      ) as rn
+    FROM `conemo-412202.firestore_curated.cur_score_current_v1`
+    WHERE participant_id = '{participant_id}'
+      AND instrument IN ('PHQ', 'PHQ_JOURNEY', 'GAD', 'GAD_JOURNEY')
+    ORDER BY score_timestamp DESC
+    """
+    try:
+        df_hist = client.query(query).to_dataframe()
+        # Classifica score atual vs histórico
+        df_hist["status_score"] = df_hist["rn"].apply(lambda x: "Atual" if x == 1 else "Histórico")
+        
+        # Tenta extrair sessão/jornada do path do Firestore quando disponível
+        def extract_context(path):
+            if not path or pd.isna(path): return "Vínculo não observável"
+            if "journeys/" in path:
+                # Extrai o ID da jornada ou parte do path para contexto
+                parts = path.split("/")
+                if "sessions" in path:
+                    idx = parts.index("sessions")
+                    return f"Sessão {parts[idx+1]}" if len(parts) > idx+1 else "Jornada"
+                return "Jornada"
+            return "Triagem/Baseline"
+            
+        df_hist["contexto"] = df_hist["path_firestore"].apply(extract_context)
+        return df_hist
+    except Exception:
+        return pd.DataFrame()
+
+
+# ---------------------------------------------------------------------------
+# Classificação operacional de adesão ao protocolo CONEMO
+#
+# Função central: deve ser chamada em TODOS os caminhos de carregamento,
+# imediatamente antes de criar df_all, df_main e df_nao_aderiu.
+#
+# Ref: Docs/nota-decisoria-nao-aderiu-dashboard.md
+# ---------------------------------------------------------------------------
+def add_conemo_protocol_status(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Aplica classificação operacional de adesão ao protocolo CONEMO.
+
+    Regra canônica dinâmica (sem hard-code de IDs ou contagens):
+    - health_unit_key == 'UNK_UHS'  →  conemo_protocol_status = 'Não Aderiu'
+    - Fallback de segurança (health_unit_key ausente/nulo): quando a chave
+      territorial não estiver recuperável, usa ubs_name/ubs_city finais
+      como mecanismo de segurança — se ambos forem 'NÃO RESPONDEU', classifica
+      como 'Não Aderiu'. Esse fallback não é o critério principal.
+    - Demais registros  →  conemo_protocol_status = 'Aderiu'
+
+    Garantias:
+    - nunca remove usuários;
+    - nunca deixa usuário sem classificação;
+    - retorna DataFrame válido mesmo se vazio (colunas obrigatórias criadas);
+    - não altera BigQuery;
+    - não expõe PII.
+    """
+    df = df.copy()
+
+    # DataFrame vazio: garantir colunas obrigatórias para não quebrar downstream
+    if df.empty:
+        if "conemo_protocol_status" not in df.columns:
+            df["conemo_protocol_status"] = pd.Series(dtype="object")
+        if "ubs_status" not in df.columns:
+            df["ubs_status"] = pd.Series(dtype="object")
+        return df
+
+    def _normalize_text(value) -> str:
+        """Normaliza texto para comparação robusta de regras operacionais."""
+        if pd.isna(value):
+            return ""
+        return str(value).strip().upper()
+
+    def _is_nao_aderiu(row: pd.Series) -> bool:
+        """
+        Critério preferencial canônico: health_unit_key == 'UNK_UHS'.
+        Fallback operacional temporário (somente quando health_unit_key não
+        estiver recuperável): UBS/cidade final = 'NÃO RESPONDEU'.
+        UBS/cidade textual continuam sendo dimensão territorial e não são
+        critério principal para status de adesão.
+        """
+        health_unit_key = _normalize_text(row.get("health_unit_key", ""))
+        if health_unit_key == "UNK_UHS":
+            return True
+        # Fallback de segurança: chave territorial ausente/nula
+        if health_unit_key in {"", "NONE", "NULL", "NAN"}:
+            ubs_name = _normalize_text(row.get("ubs_name", ""))
+            ubs_city = _normalize_text(row.get("ubs_city", ""))
+            return (ubs_name == "NÃO RESPONDEU") or (ubs_city == "NÃO RESPONDEU")
+        return False
+
+    mask_nao_aderiu = df.apply(_is_nao_aderiu, axis=1)
+    df["conemo_protocol_status"] = mask_nao_aderiu.map({True: "Não Aderiu", False: "Aderiu"})
+    df["ubs_status"] = mask_nao_aderiu.map({True: "Sem UBS/município informado", False: "UBS/município informado"})
     return df
 
 
@@ -126,7 +277,8 @@ def load_data() -> pd.DataFrame:
         st.session_state["data_source"] = "BigQuery (Canônico)"
         st.session_state["last_update"] = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
         st.session_state["bq_success"] = True
-        return df
+        # Não retorna aqui: continua para bloco de normalização e classificação
+        # centralizada (add_conemo_protocol_status), comum a todos os caminhos.
         
     except Exception as e:
         # Fallback técnico controlado para Parquet
@@ -136,7 +288,7 @@ def load_data() -> pd.DataFrame:
         
         if not os.path.exists(PARQUET_PATH):
             st.error("Falha crítica: nem BigQuery nem Parquet estão disponíveis.")
-            return pd.DataFrame()
+            return add_conemo_protocol_status(pd.DataFrame())
 
         df = pd.read_parquet(PARQUET_PATH)
         st.session_state["data_source"] = "Parquet (Fallback Técnico)"
@@ -163,8 +315,8 @@ def load_data() -> pd.DataFrame:
                 birth_seconds = bd.get("_seconds") if isinstance(bd, dict) else None
                 
                 return pd.Series({
-                    "ubs_name": org.get("name", "N/A"),
-                    "ubs_city": org.get("city", "N/A"),
+                    "ubs_name": org.get("name", "Não respondeu"),
+                    "ubs_city": org.get("city", "Não respondeu"),
                     "phq_score": phq,
                     "gad_score": gad,
                     "gender": data.get("gender", "N/A"),
@@ -177,7 +329,7 @@ def load_data() -> pd.DataFrame:
                     "is_test_environment": bool(org.get("testEnvironment", False)),
                 })
             except Exception:
-                return pd.Series({"ubs_name": "N/A", "ubs_city": "N/A", "phq_score": None, "gad_score": None, 
+                return pd.Series({"ubs_name": "Não respondeu", "ubs_city": "Não respondeu", "phq_score": None, "gad_score": None, 
                                  "gender": "N/A", "user_name": "N/A", "birth_seconds": None, "created_at_seconds": None,
                                  "is_test": False, "is_test_user": False, "is_invalid": False, "is_test_environment": False})
 
@@ -206,17 +358,47 @@ def load_data() -> pd.DataFrame:
         df = df[(df["created_at_seconds"] >= CUTOFF_SECONDS) & (~has_test_or_invalid_flag)]
 
     # Normalizações finais (comuns a ambas as fontes)
+    if "health_unit_key" not in df.columns:
+        # Fallback técnico: coluna não existe em alguns legados de parquet.
+        df["health_unit_key"] = None
+
     df["ubs_name"] = df["ubs_name"].str.upper().str.strip()
     df["ubs_city"] = df["ubs_city"].str.strip().str.title()
     
     _CIDADES_INVALIDAS = {"Fake City", "N/A", ""}
     df = df[df["ubs_city"].notna() & (~df["ubs_city"].isin(_CIDADES_INVALIDAS))]
 
-    return df
+    # -----------------------------------------------------------------------
+    # Classificação operacional centralizada.
+    # add_conemo_protocol_status cria conemo_protocol_status e ubs_status
+    # usando a regra canônica dinâmica (health_unit_key == 'UNK_UHS').
+    # Chamada aqui para todos os caminhos (BigQuery e Parquet fallback).
+    # Ref: Docs/nota-decisoria-nao-aderiu-dashboard.md
+    # -----------------------------------------------------------------------
+    return add_conemo_protocol_status(df)
 
 
 # Inicializa carregamento
-df = load_data()
+df_all = load_data()
+
+# Etapa 3 — análises principais com aderentes
+if "conemo_protocol_status" in df_all.columns:
+    df_main = df_all[df_all["conemo_protocol_status"] == "Aderiu"].copy()
+else:
+    st.error("Campo conemo_protocol_status ausente. Análises principais bloqueadas por segurança.")
+    df_main = df_all.iloc[0:0].copy()
+
+# Etapa 4 — monitoramento separado do grupo Não Aderiu
+if "conemo_protocol_status" in df_all.columns:
+    df_nao_aderiu = df_all[df_all["conemo_protocol_status"] == "Não Aderiu"].copy()
+else:
+    df_nao_aderiu = df_all.iloc[0:0].copy()
+
+# Alias legado para blocos auxiliares
+df = df_all
+
+# Base aderente explícita para todo componente analítico principal
+df_main_users = df_main.drop_duplicates(subset="user_id")
 
 # ---------------------------------------------------------------------------
 # Sidebar — navegação, timestamp e botão de atualização
@@ -286,17 +468,28 @@ if page == "📊 Estatísticas por UBS":
 
     # --- Filtros ---
     col_f1, col_f2 = st.columns(2)
-    all_cities = sorted(df["ubs_city"].dropna().unique())
-    sel_cities = col_f1.multiselect("Cidade", all_cities, default=all_cities)
+    all_cities = sorted(df_main_users["ubs_city"].dropna().unique())
+    sel_cities = col_f1.multiselect(
+        "Cidade",
+        all_cities,
+        default=all_cities,
+        key="filtro_cidade_aderiu_v2",
+    )
 
-    df_city = df[df["ubs_city"].isin(sel_cities)] if sel_cities else df
-    all_ubs = sorted(df_city["ubs_name"].dropna().unique())
-    sel_ubs = col_f2.multiselect("UBS", all_ubs, default=all_ubs)
+    df_city = df_main[df_main["ubs_city"].isin(sel_cities)] if sel_cities else df_main
+    df_city_users = df_main_users[df_main_users["ubs_city"].isin(sel_cities)] if sel_cities else df_main_users
+    all_ubs = sorted(df_city_users["ubs_name"].dropna().unique())
+    sel_ubs = col_f2.multiselect(
+        "UBS",
+        all_ubs,
+        default=all_ubs,
+        key="filtro_ubs_aderiu_v2",
+    )
 
     dff = df_city[df_city["ubs_name"].isin(sel_ubs)] if sel_ubs else df_city
 
-    # DataFrame de participantes únicos (um por user_id)
-    df_users = dff.drop_duplicates(subset="user_id")
+    # DataFrame de participantes únicos (base aderente explícita)
+    df_users = df_city_users[df_city_users["ubs_name"].isin(sel_ubs)] if sel_ubs else df_city_users
 
     # --- Métricas ---
     total_users = df_users["user_id"].nunique()
@@ -372,6 +565,111 @@ if page == "📊 Estatísticas por UBS":
     resumo = resumo[["UBS", "Participantes", "PHQ-9 Média", "GAD-7 Média", "Conclusão (%)"]].sort_values("Participantes", ascending=False)
     st.dataframe(resumo, width='stretch', hide_index=True)
 
+# ---------------------------------------------------------------------------
+# Governança — Monitoramento do grupo "Não Aderiu"
+#
+# Seção separada para acompanhamento agregado (sem PII) de usuários que não
+# aderiram plenamente ao protocolo clínico de inclusão/entrada do CONEMO.
+# Ref: Docs/nota-decisoria-nao-aderiu-dashboard.md
+# ---------------------------------------------------------------------------
+st.markdown("---")
+with st.expander("🔍 Governança — Qualidade de Dados (Não Aderiu)"):
+    st.markdown(
+        """
+        **Nota de Governança:**
+        
+        Usuários classificados como "Não Aderiu" não aderiram plenamente ao 
+        protocolo clínico de inclusão/entrada do CONEMO. Eles são monitorados 
+        apenas para governança e qualidade dos dados. **Não compõem os 
+        indicadores principais do dashboard** (que exibe 132 participantes aderentes).
+        """
+    )
+    
+    st.markdown("---")
+    
+    if df_nao_aderiu.empty:
+        st.info("Nenhum usuário registrado no grupo 'Não Aderiu'.")
+    else:
+        # Métricas agregadas (sem PII, apenas contagens)
+        col_g1, col_g2, col_g3 = st.columns(3)
+        
+        total_nao_aderiu = df_nao_aderiu["user_id"].nunique()
+        total_geral = df_all["user_id"].nunique()
+        pct_nao_aderiu = (total_nao_aderiu / total_geral * 100) if total_geral > 0 else 0
+        
+        col_g1.metric("Total — Não Aderiu", total_nao_aderiu)
+        col_g2.metric("% do Total Interno", f"{pct_nao_aderiu:.1f}%")
+        
+        # Breakdown: com/sem score
+        nao_aderiu_com_score = (
+            df_nao_aderiu[
+                (df_nao_aderiu["phq_score"].notna()) | (df_nao_aderiu["gad_score"].notna())
+            ]["user_id"].nunique()
+        )
+        nao_aderiu_sem_score = total_nao_aderiu - nao_aderiu_com_score
+        col_g3.metric("Sem Score PHQ/GAD", nao_aderiu_sem_score)
+        
+        col_g4, col_g5 = st.columns(2)
+        col_g4.metric("Com algum Score PHQ/GAD", nao_aderiu_com_score)
+        
+        # Critério de classificação: health_unit_key
+        nao_aderiu_unk_uhs = (
+            df_nao_aderiu[df_nao_aderiu["health_unit_key"] == "UNK_UHS"]["user_id"].nunique()
+        )
+        col_g5.metric("health_unit_key = UNK_UHS", nao_aderiu_unk_uhs)
+        
+        st.markdown("---")
+        
+        # Distribuição temporal (agregado por mês)
+        st.subheader("Distribuição Temporal — Entrada de Não Aderentes")
+        if "created_at" in df_nao_aderiu.columns:
+            df_temporal = df_nao_aderiu.copy()
+            df_temporal["created_at"] = pd.to_datetime(df_temporal["created_at"], errors="coerce")
+            df_temporal["mes_entrada"] = df_temporal["created_at"].dt.strftime("%Y-%m")
+            temporal_agg = df_temporal.groupby("mes_entrada")["user_id"].nunique().reset_index()
+            temporal_agg.columns = ["Mês", "Contagem"]
+            temporal_agg = temporal_agg.sort_values("Mês")
+            
+            fig_temporal = px.bar(
+                temporal_agg,
+                x="Mês",
+                y="Contagem",
+                color="Contagem",
+                color_continuous_scale="Blues",
+                title="Entrada de Usuários — Não Aderiu"
+            )
+            fig_temporal.update_layout(height=300, showlegend=False)
+            st.plotly_chart(fig_temporal, width='stretch')
+        
+        st.markdown("---")
+        
+        # Status territorial (agregado)
+        st.subheader("Status Territorial — Não Aderentes")
+        if "ubs_status" in df_nao_aderiu.columns:
+            ubs_status_counts = df_nao_aderiu["ubs_status"].value_counts().reset_index()
+            ubs_status_counts.columns = ["Status", "Contagem"]
+            fig_ubs_status = px.pie(
+                ubs_status_counts,
+                names="Status",
+                values="Contagem",
+                hole=0.4,
+                title="Distribuição — Status Territorial"
+            )
+            fig_ubs_status.update_layout(height=300)
+            st.plotly_chart(fig_ubs_status, width='stretch')
+        
+        st.markdown("---")
+        
+        # Intervalo de data
+        if "created_at" in df_nao_aderiu.columns:
+            df_temporal_check = df_nao_aderiu.copy()
+            df_temporal_check["created_at"] = pd.to_datetime(df_temporal_check["created_at"], errors="coerce")
+            data_min = df_temporal_check["created_at"].min()
+            data_max = df_temporal_check["created_at"].max()
+            st.info(
+                f"**Intervalo de Entrada:** {data_min.strftime('%d/%m/%Y %H:%M') if pd.notna(data_min) else 'N/D'} "
+                f"até {data_max.strftime('%d/%m/%Y %H:%M') if pd.notna(data_max) else 'N/D'}"
+            )
 
 # ---------------------------------------------------------------------------
 # Visão individual por participante
@@ -406,9 +704,9 @@ with st.expander("👤 Consulta individual por participante (visão auxiliar)"):
         p4.metric("Idade", age_str)
         p5.metric("E-mail", email_masked)
 
-        # Scores
+        # Scores Atuais
         st.markdown("---")
-        st.subheader("Scores de Saúde Mental (Baseline)")
+        st.subheader("Scores de Saúde Mental (Representação Atual)")
         phq = row.get("phq_score")
         gad = row.get("gad_score")
         phq_label, gad_label = phq_severity(phq), gad_severity(gad)
@@ -426,7 +724,33 @@ with st.expander("👤 Consulta individual por participante (visão auxiliar)"):
             fig_gad.update_layout(height=280)
             st.plotly_chart(fig_gad, width='stretch')
 
-        # Progresso
+        # Histórico Longitudinal (Fase D.4)
+        st.markdown("---")
+        st.subheader("📜 Histórico Longitudinal PHQ/GAD")
+        
+        # Carrega histórico apenas se estiver em modo BigQuery
+        if st.session_state.get("bq_success", False):
+            df_history = load_history_from_bigquery(selected_id)
+            if not df_history.empty:
+                st.dataframe(
+                    df_history[["instrument", "score", "data_avaliacao", "status_score", "contexto"]].rename(
+                        columns={
+                            "instrument": "Instrumento",
+                            "score": "Score",
+                            "data_avaliacao": "Data da Avaliação",
+                            "status_score": "Status",
+                            "contexto": "Origem/Contexto"
+                        }
+                    ),
+                    width='stretch',
+                    hide_index=True
+                )
+            else:
+                st.info("Nenhum histórico adicional encontrado para este participante.")
+        else:
+            st.info("Histórico longitudinal disponível apenas na conexão BigQuery (Modo Canônico).")
+
+        # Progresso das Sessões
         st.markdown("---")
         st.subheader("Progresso das Sessões")
         sessions = df_user.drop_duplicates(subset="sessionNumber").sort_values("sessionNumber")[["sessionNumber", "isCompleted", "completedDate"]].copy()
