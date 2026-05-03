@@ -30,7 +30,12 @@ Este documento serve como índice consolidado e ponto de partida para a revisão
 
 ## 3. Pull Requests Relacionados
 - **PR #5:** Fase D.3 — Reintegração e Reconciliação de Denominadores.
-- **PR #6:** Fase D.4 — Histórico Longitudinal PHQ/GAD.
+- **PR #6:** **Ready for Review (review-only)** — Regra “Não Aderiu” (Etapa 5 / Fase D.5): exclusão do grupo “Não Aderiu” das análises centrais (`df_main`) e manutenção em governança separada (`df_nao_aderiu`), com documentação institucional associada.  
+  - **Título atual:** PR #6 (review-only): Criou regra para excluir o grupo “Não Aderiu” das análises centrais do Dashboard + documentação institucional (Etapa 5)  
+  - **Link:** https://github.com/conemo-project/conemo/pull/6  
+  - **Ressalva de escopo:** o PR contém arquivos adicionais além do escopo originalmente restrito da Etapa 5 / Fase D.5; inclusão aceita por decisão posterior do professor **apenas para fins de revisão**.  
+  - **Gates preservados:** sem merge; sem deploy; status operacional fora de escopo; dashboard permanece **NÃO OPERACIONAL**.  
+  - **Próxima ação:** aguardar revisão do PR #6 antes de qualquer decisão de merge.
 
 ---
 
@@ -57,6 +62,14 @@ streamlit run Code/PY/dashboard_conemo.py
 - **Merge/Deploy:** Bloqueados até conclusão da auditoria final.
 
 ---
+
+## 7. Próxima fase potencial (não autorizada para execução)
+
+Tema potencial para fase futura, **somente após** a revisão do PR #6 e autorização explícita do professor:
+
+- reconciliar a versão canônica `Code/PY/dashboard_conemo.py` com a versão com melhorias visuais `Code/PY/dashboard-conemo-2026-04-20-v1.py`, preservando dados reais, regra “Não Aderiu”, data de corte, governança e mantendo status **NÃO OPERACIONAL** até nova deliberação.
+
+---
 **Autor:** Ricardo Ceneviva  
-**Data:** 2026-04-26  
+**Data:** 2026-05-03  
 **Projeto:** CONEMO
