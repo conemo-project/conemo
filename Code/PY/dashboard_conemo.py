@@ -7,6 +7,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 from google.cloud import bigquery
+from google.oauth2 import service_account
 
 # ---------------------------------------------------------------------------
 # Configuração da página
@@ -25,6 +26,28 @@ PARQUET_PATH = os.path.join(
 # Data de corte operacional canônica do dashboard (inclusiva)
 DASHBOARD_CUTOFF_TS = "2026-01-28 00:00:00 UTC"
 DASHBOARD_CUTOFF_SECONDS = int(pd.Timestamp(DASHBOARD_CUTOFF_TS).timestamp())
+
+# ---------------------------------------------------------------------------
+# Helper: cria cliente BigQuery com credenciais de st.secrets.
+#
+# Em produção/Streamlit Cloud: usa [gcp_service_account] dos Secrets.
+# Em desenvolvimento local com ADC configurado: usa Application Default Credentials.
+# Ref: Fase Beta-2 — correção mínima de credencial (sem alteração de lógica).
+# ---------------------------------------------------------------------------
+def _get_bq_client() -> bigquery.Client:
+    """Retorna cliente BigQuery autenticado via st.secrets ou ADC."""
+    if "gcp_service_account" in st.secrets:
+        creds = service_account.Credentials.from_service_account_info(
+            dict(st.secrets["gcp_service_account"]),
+            scopes=["https://www.googleapis.com/auth/bigquery"],
+        )
+        return bigquery.Client(
+            credentials=creds,
+            project=st.secrets["gcp_service_account"]["project_id"],
+        )
+    # Fallback: Application Default Credentials (desenvolvimento local)
+    return bigquery.Client(project="conemo-412202")
+
 
 # ---------------------------------------------------------------------------
 # P0.1 — Timestamp da última atualização (BigQuery ou Cache local)
@@ -52,7 +75,7 @@ def get_update_timestamp() -> str:
 # ---------------------------------------------------------------------------
 def load_data_from_bigquery() -> pd.DataFrame:
     """Executa consulta controlada no BigQuery preservando o contrato do Dashboard."""
-    client = bigquery.Client()
+    client = _get_bq_client()
     
     # Query reintegrando scores PHQ/GAD via cur_score_current_v1 (Fase D.3)
     # Correção D.3 Corretiva: Ajuste de denominador para incluir UNK_UHS (válidos) 
@@ -162,7 +185,7 @@ def load_data_from_bigquery() -> pd.DataFrame:
 @st.cache_data(ttl=900)
 def load_history_from_bigquery(participant_id: str) -> pd.DataFrame:
     """Carrega o histórico completo de PHQ/GAD para um participante específico."""
-    client = bigquery.Client()
+    client = _get_bq_client()
     query = f"""
     SELECT 
       instrument,
