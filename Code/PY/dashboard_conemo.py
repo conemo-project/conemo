@@ -30,23 +30,52 @@ DASHBOARD_CUTOFF_SECONDS = int(pd.Timestamp(DASHBOARD_CUTOFF_TS).timestamp())
 # ---------------------------------------------------------------------------
 # Helper: cria cliente BigQuery com credenciais de st.secrets.
 #
-# Em produção/Streamlit Cloud: usa [gcp_service_account] dos Secrets.
-# Em desenvolvimento local com ADC configurado: usa Application Default Credentials.
-# Ref: Fase Beta-2 — correção mínima de credencial (sem alteração de lógica).
+# Streamlit Cloud: usa obrigatoriamente [gcp_service_account] dos Secrets.
+#   Se ausente ou inválido, levanta RuntimeError explícito — NÃO tenta o
+#   Compute Engine Metadata Server (metadata.google.internal), que não existe
+#   no ambiente Streamlit Community Cloud.
+#
+# Desenvolvimento local: fallback ADC somente quando GOOGLE_APPLICATION_CREDENTIALS
+#   apontar para um arquivo existente.
+#
+# Ref: Fase Beta-2 v2 — corrigir queda para metadata server quando secret
+#   ausente/inválido (erro: "Failed to retrieve http://metadata.google.internal").
 # ---------------------------------------------------------------------------
 def _get_bq_client() -> bigquery.Client:
-    """Retorna cliente BigQuery autenticado via st.secrets ou ADC."""
-    if "gcp_service_account" in st.secrets:
-        creds = service_account.Credentials.from_service_account_info(
-            dict(st.secrets["gcp_service_account"]),
-            scopes=["https://www.googleapis.com/auth/bigquery"],
-        )
-        return bigquery.Client(
-            credentials=creds,
-            project=st.secrets["gcp_service_account"]["project_id"],
-        )
-    # Fallback: Application Default Credentials (desenvolvimento local)
-    return bigquery.Client(project="conemo-412202")
+    """Retorna cliente BigQuery autenticado via st.secrets ou ADC local.
+
+    Streamlit Cloud: exige [gcp_service_account] nos Secrets. Falha explícita
+    e controlada se ausente — nunca tenta o metadata server.
+    Local: usa GOOGLE_APPLICATION_CREDENTIALS se definido e existir.
+    """
+    try:
+        if "gcp_service_account" in st.secrets:
+            info = dict(st.secrets["gcp_service_account"])
+            creds = service_account.Credentials.from_service_account_info(
+                info,
+                scopes=["https://www.googleapis.com/auth/cloud-platform"],
+            )
+            return bigquery.Client(
+                credentials=creds,
+                project=creds.project_id,
+            )
+    except Exception as exc:
+        raise RuntimeError(
+            "Secret [gcp_service_account] ausente, incompleto ou inválido no Streamlit Cloud. "
+            "Configure os Secrets em Manage app → Settings → Secrets."
+        ) from exc
+
+    # Fallback local: somente quando GOOGLE_APPLICATION_CREDENTIALS existir explicitamente.
+    # Garante que o metadata server NUNCA seja tentado no Streamlit Cloud.
+    local_creds = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", "")
+    if local_creds and os.path.exists(local_creds):
+        return bigquery.Client(project="conemo-412202")
+
+    raise RuntimeError(
+        "Credenciais BigQuery indisponíveis. "
+        "No Streamlit Cloud: configure [gcp_service_account] nos Secrets. "
+        "Localmente: defina GOOGLE_APPLICATION_CREDENTIALS."
+    )
 
 
 # ---------------------------------------------------------------------------
