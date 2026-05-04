@@ -22,6 +22,10 @@ PARQUET_PATH = os.path.join(
     "../../Data/PARQUET/conemo_dados_consolidados_raw_04_03_2026.parquet",
 )
 
+# Data de corte operacional canônica do dashboard (inclusiva)
+DASHBOARD_CUTOFF_TS = "2026-01-28 00:00:00 UTC"
+DASHBOARD_CUTOFF_SECONDS = int(pd.Timestamp(DASHBOARD_CUTOFF_TS).timestamp())
+
 # ---------------------------------------------------------------------------
 # P0.1 — Timestamp da última atualização (BigQuery ou Cache local)
 #
@@ -53,7 +57,7 @@ def load_data_from_bigquery() -> pd.DataFrame:
     # Query reintegrando scores PHQ/GAD via cur_score_current_v1 (Fase D.3)
     # Correção D.3 Corretiva: Ajuste de denominador para incluir UNK_UHS (válidos) 
     # e excluir rigorosamente testes do RAW.
-    query = """
+    query = f"""
     WITH raw_perfil AS (
       -- Extração de campos demográficos e identificadores da camada RAW
       -- Adição de flags de teste do RAW para exclusão segura (D.3 Corretiva)
@@ -113,7 +117,7 @@ def load_data_from_bigquery() -> pd.DataFrame:
     LEFT JOIN `conemo-412202.firestore_curated.cur_health_unit_v1` u ON p.health_unit_key = u.health_unit_key
     LEFT JOIN raw_perfil r ON p.source_user_id = r.source_user_id
     LEFT JOIN score_latest sl ON p.participant_master_id = sl.participant_id
-    WHERE p.created_at >= TIMESTAMP('2026-01-25 00:00:00 UTC')
+        WHERE p.created_at >= TIMESTAMP('{DASHBOARD_CUTOFF_TS}')
       -- Regra Segura D.3 Corretiva: Inclui NULLs (válidos), exclui testes explícitos do Curated e do RAW
       AND (p.is_test_record IS NOT TRUE)
       AND (r.is_test_raw IS NULL OR r.is_test_raw = 'false')
@@ -288,6 +292,7 @@ def load_data() -> pd.DataFrame:
         
         if not os.path.exists(PARQUET_PATH):
             st.error("Falha crítica: nem BigQuery nem Parquet estão disponíveis.")
+            # add_conemo_protocol_status garante colunas obrigatórias mesmo no DataFrame vazio
             return add_conemo_protocol_status(pd.DataFrame())
 
         df = pd.read_parquet(PARQUET_PATH)
@@ -348,14 +353,13 @@ def load_data() -> pd.DataFrame:
         df["age"] = df["birth_seconds"].apply(calculate_age)
         
         # Filtros Legado (Fase B)
-        CUTOFF_SECONDS = 1769299200
         test_city_pattern = r"test|teste|fake|load|carga|break|quebra"
         has_test_or_invalid_flag = (
             df["is_test"].fillna(False) | df["is_test_user"].fillna(False) | 
             df["is_invalid"].fillna(False) | df["is_test_environment"].fillna(False) | 
             df["ubs_city"].fillna("").str.lower().str.contains(test_city_pattern, regex=True)
         )
-        df = df[(df["created_at_seconds"] >= CUTOFF_SECONDS) & (~has_test_or_invalid_flag)]
+        df = df[(df["created_at_seconds"] >= DASHBOARD_CUTOFF_SECONDS) & (~has_test_or_invalid_flag)]
 
     # Normalizações finais (comuns a ambas as fontes)
     if "health_unit_key" not in df.columns:
@@ -381,20 +385,30 @@ def load_data() -> pd.DataFrame:
 # Inicializa carregamento
 df_all = load_data()
 
-# Etapa 3 — análises principais com aderentes
+# ---------------------------------------------------------------------------
+# Etapa 3 — Filtro dinâmico das análises principais
+#
+# Regras:
+# - preservar DataFrame original completo (df_all), sem remoção física;
+# - usar apenas aderentes nas análises principais (df_main);
+# - não criar nova seção visual nesta etapa.
+# ---------------------------------------------------------------------------
 if "conemo_protocol_status" in df_all.columns:
     df_main = df_all[df_all["conemo_protocol_status"] == "Aderiu"].copy()
 else:
+    # Fallback seguro: sem status de adesão, bloquear análises principais
+    # para evitar contaminação por base completa.
     st.error("Campo conemo_protocol_status ausente. Análises principais bloqueadas por segurança.")
     df_main = df_all.iloc[0:0].copy()
 
-# Etapa 4 — monitoramento separado do grupo Não Aderiu
+# Etapa 4 — Seção separada de monitoramento agregado do grupo Não Aderiu
 if "conemo_protocol_status" in df_all.columns:
     df_nao_aderiu = df_all[df_all["conemo_protocol_status"] == "Não Aderiu"].copy()
 else:
+    # Fallback defensivo: sem coluna de status, seção agregada fica vazia.
     df_nao_aderiu = df_all.iloc[0:0].copy()
 
-# Alias legado para blocos auxiliares
+# Mantém alias legado para blocos auxiliares já existentes
 df = df_all
 
 # Base aderente explícita para todo componente analítico principal
@@ -423,7 +437,11 @@ st.sidebar.markdown("---")
 # P0.2 — Navegação principal orientada a UBS/gestão
 page = st.sidebar.radio(
     "Navegação",
-    ["📊 Estatísticas por UBS"],
+    [
+        "📊 Estatísticas por UBS",
+        "🔍 Governança — Não Aderiu",
+        "👤 Consulta auxiliar",
+    ],
 )
 
 # ---------------------------------------------------------------------------
@@ -460,38 +478,130 @@ def severity_color(label):
     return colors.get(label, "gray")
 
 
+def age_group(age_value):
+    if pd.isna(age_value):
+        return "Não informado"
+    try:
+        age_int = int(age_value)
+    except Exception:
+        return "Não informado"
+    if age_int < 18:
+        return "< 18"
+    if age_int <= 29:
+        return "18–29"
+    if age_int <= 39:
+        return "30–39"
+    if age_int <= 49:
+        return "40–49"
+    if age_int <= 59:
+        return "50–59"
+    if age_int <= 69:
+        return "60–69"
+    if age_int <= 79:
+        return "70–79"
+    return "80+"
+
+def _status_caption(page_label: str) -> None:
+    st.caption(
+        f"**{page_label}** — dashboard permanece **NÃO OPERACIONAL**. "
+        "Execução local/validação técnica ≠ operacionalização institucional."
+    )
+
+
+def validate_runtime_contract(
+    df_all: pd.DataFrame,
+    df_main: pd.DataFrame,
+    df_nao_aderiu: pd.DataFrame,
+    df_main_users: pd.DataFrame,
+) -> tuple[list[str], list[str]]:
+    """
+    Checagens leves de integridade de denominador/segregação/PII.
+    - Não altera dados nem controla fonte/query.
+    - Separa issues críticos (bloqueiam tela) de warnings preventivos (não bloqueiam por si só).
+    """
+    critical_issues: list[str] = []
+    warnings: list[str] = []
+
+    if df_all is None or df_main is None or df_nao_aderiu is None:
+        return (["DataFrames essenciais ausentes (df_all/df_main/df_nao_aderiu)."], [])
+
+    if "conemo_protocol_status" not in df_all.columns:
+        critical_issues.append("Coluna `conemo_protocol_status` ausente em `df_all`.")
+        return (critical_issues, warnings)
+
+    # Denominadores e segregação
+    if (not df_main.empty) and (df_main["conemo_protocol_status"] == "Não Aderiu").any():
+        critical_issues.append("Violação de denominador: `df_main` contém registros `Não Aderiu`.")
+
+    if (not df_nao_aderiu.empty) and (df_nao_aderiu["conemo_protocol_status"] == "Aderiu").any():
+        critical_issues.append("Violação de segregação: `df_nao_aderiu` contém registros `Aderiu`.")
+
+    if df_main_users is None or ("user_id" not in df_main_users.columns):
+        critical_issues.append("Base `df_main_users` ausente ou sem coluna `user_id`.")
+
+    # PII (checagem preventiva: não deve aparecer em tabelas centrais)
+    # Observação: a visão auxiliar pode manter e-mail mascarado por legado.
+    sensitive_columns = {"cpf", "phone", "telefone", "whatsapp", "address", "endereco"}
+    lower_cols = {c.lower() for c in df_all.columns}
+    if lower_cols.intersection(sensitive_columns):
+        warnings.append("Atenção: colunas sensíveis detectadas no dataset carregado; não devem ser exibidas.")
+
+    return (critical_issues, warnings)
+
+
 # ---------------------------------------------------------------------------
 # Página 1 — Estatísticas por UBS
 # ---------------------------------------------------------------------------
 if page == "📊 Estatísticas por UBS":
     st.title("Estatísticas por UBS")
+    _status_caption("Tela central (UBS)")
 
-    # --- Filtros ---
-    col_f1, col_f2 = st.columns(2)
-    all_cities = sorted(df_main_users["ubs_city"].dropna().unique())
-    sel_cities = col_f1.multiselect(
-        "Cidade",
-        all_cities,
-        default=all_cities,
-        key="filtro_cidade_aderiu_v2",
-    )
+    critical_issues, warnings = validate_runtime_contract(df_all, df_main, df_nao_aderiu, df_main_users)
+    for msg in warnings:
+        st.warning(msg)
+    if critical_issues:
+        st.error("Checagens de integridade falharam (bloqueio local desta tela):")
+        for msg in critical_issues:
+            st.write(f"- {msg}")
+        st.stop()
 
-    df_city = df_main[df_main["ubs_city"].isin(sel_cities)] if sel_cities else df_main
-    df_city_users = df_main_users[df_main_users["ubs_city"].isin(sel_cities)] if sel_cities else df_main_users
-    all_ubs = sorted(df_city_users["ubs_name"].dropna().unique())
-    sel_ubs = col_f2.multiselect(
-        "UBS",
-        all_ubs,
-        default=all_ubs,
-        key="filtro_ubs_aderiu_v2",
-    )
+    st.divider()
+
+    # --- Filtros (aderentes) ---
+    with st.container():
+        st.subheader("Usuários Ativos")
+        col_f1, col_f2 = st.columns(2)
+        all_cities = sorted(df_main_users["ubs_city"].dropna().unique())
+        sel_cities = col_f1.multiselect(
+            "Cidade",
+            all_cities,
+            default=all_cities,
+            key="filtro_cidade_aderiu_v2",
+        )
+
+        df_city = df_main[df_main["ubs_city"].isin(sel_cities)] if sel_cities else df_main
+        df_city_users = df_main_users[df_main_users["ubs_city"].isin(sel_cities)] if sel_cities else df_main_users
+        all_ubs = sorted(df_city_users["ubs_name"].dropna().unique())
+        sel_ubs = col_f2.multiselect(
+            "UBS",
+            all_ubs,
+            default=all_ubs,
+            key="filtro_ubs_aderiu_v2",
+        )
 
     dff = df_city[df_city["ubs_name"].isin(sel_ubs)] if sel_ubs else df_city
 
     # DataFrame de participantes únicos (base aderente explícita)
     df_users = df_city_users[df_city_users["ubs_name"].isin(sel_ubs)] if sel_ubs else df_city_users
+    if (not df_users.empty) and (not df_main_users.empty):
+        if not set(df_users["user_id"].unique()).issubset(set(df_main_users["user_id"].unique())):
+            st.error("Violação de denominador: `df_users` não é subconjunto de `df_main_users` (bloqueio local).")
+            st.stop()
 
-    # --- Métricas ---
+    st.divider()
+
+    # --- Métricas (aderentes) ---
+    st.subheader("Resumo executivo")
     total_users = df_users["user_id"].nunique()
     mean_phq = df_users["phq_score"].mean()
     mean_gad = df_users["gad_score"].mean()
@@ -505,65 +615,350 @@ if page == "📊 Estatísticas por UBS":
     m3.metric("Média GAD-7 (Ansiedade)", f"{mean_gad:.1f}" if pd.notna(mean_gad) else "N/D")
     m4.metric("Conclusão de Sessões", f"{completion_rate:.1f}%")
 
-    st.markdown("---")
+    st.caption("Todas as métricas acima são calculadas sobre `df_main`/`df_main_users` (aderentes) e seus derivados locais.")
 
-    # --- Gráficos: linha 1 ---
-    col1, col2 = st.columns(2)
+    st.divider()
 
-    with col1:
-        st.subheader("Participantes por UBS")
-        ubs_count = df_users["ubs_name"].value_counts().reset_index()
-        ubs_count.columns = ["UBS", "Participantes"]
-        fig = px.bar(ubs_count.sort_values("Participantes"), x="Participantes", y="UBS", orientation="h", color="Participantes", color_continuous_scale="Blues")
-        fig.update_layout(showlegend=False, coloraxis_showscale=False, height=400)
-        st.plotly_chart(fig, width='stretch')
+    tab_a, tab_b = st.tabs(["📈 Indicadores por UBS", "👥 Perfil e completude"])
 
-    with col2:
-        st.subheader("Média PHQ-9 e GAD-7 por UBS")
-        scores_ubs = df_users.groupby("ubs_name")[["phq_score", "gad_score"]].mean().reset_index().rename(columns={"ubs_name": "UBS", "phq_score": "PHQ-9", "gad_score": "GAD-7"})
-        scores_melt = scores_ubs.melt(id_vars="UBS", var_name="Escala", value_name="Média")
-        fig2 = px.bar(scores_melt, x="Média", y="UBS", color="Escala", orientation="h", barmode="group", color_discrete_map={"PHQ-9": "#EF553B", "GAD-7": "#636EFA"})
-        fig2.update_layout(height=400)
-        st.plotly_chart(fig2, width='stretch')
+    with tab_a:
+        col1, col2 = st.columns(2)
+        with col1:
+            st.subheader("Participantes por UBS")
+            ubs_count = df_users["ubs_name"].value_counts().reset_index()
+            ubs_count.columns = ["UBS", "Participantes"]
+            fig = px.bar(
+                ubs_count.sort_values("Participantes"),
+                x="Participantes",
+                y="UBS",
+                orientation="h",
+                color="Participantes",
+                color_continuous_scale="Blues",
+            )
+            fig.update_layout(showlegend=False, coloraxis_showscale=False, height=420)
+            st.plotly_chart(fig, width="stretch")
+            # E.7-C.1 — CSV-02: participantes_por_ubs.csv
+            # Base: df_users (derivado de df_main_users, aderentes). Sem RAW, sem PII direta.
+            st.caption("⚠️ Exportação para uso interno autorizado — dados restritos à finalidade assistencial/operacional CONEMO. Dashboard NÃO OPERACIONAL.")
+            st.download_button(
+                "⬇️ CSV — Participantes por UBS",
+                ubs_count.to_csv(index=False).encode("utf-8"),
+                "participantes_por_ubs.csv",
+                "text/csv",
+                key="dl_ubs_count",
+            )
 
-    # --- Gráficos: linha 2 ---
-    col3, col4, col5 = st.columns(3)
+        with col2:
+            st.subheader("Média PHQ-9 e GAD-7 por UBS")
+            scores_ubs = (
+                df_users.groupby("ubs_name")[["phq_score", "gad_score"]]
+                .mean()
+                .reset_index()
+                .rename(columns={"ubs_name": "UBS", "phq_score": "PHQ-9", "gad_score": "GAD-7"})
+            )
+            scores_melt = scores_ubs.melt(id_vars="UBS", var_name="Escala", value_name="Média")
+            fig2 = px.bar(
+                scores_melt,
+                x="Média",
+                y="UBS",
+                color="Escala",
+                orientation="h",
+                barmode="group",
+                color_discrete_map={"PHQ-9": "#EF553B", "GAD-7": "#636EFA"},
+            )
+            fig2.update_layout(height=420)
+            st.plotly_chart(fig2, width="stretch")
+            # E.7-C.1 — CSV-03: scores_phq_gad_por_ubs.csv
+            # Base: df_users agrupado por UBS, médias PHQ-9/GAD-7. Sem RAW, sem PII direta.
+            st.caption("⚠️ Exportação para uso interno autorizado. Dashboard NÃO OPERACIONAL.")
+            st.download_button(
+                "⬇️ CSV — Scores PHQ-9 e GAD-7 por UBS",
+                scores_ubs.to_csv(index=False).encode("utf-8"),
+                "scores_phq_gad_por_ubs.csv",
+                "text/csv",
+                key="dl_scores_ubs",
+            )
 
-    with col3:
-        st.subheader("Taxa de Conclusão por UBS")
-        comp_ubs = dff.groupby("ubs_name")["isCompleted"].apply(lambda x: x.mean() * 100 if x.count() > 0 else 0.0).reset_index(name="Taxa (%)")
-        comp_ubs = comp_ubs.rename(columns={"ubs_name": "UBS"})
-        fig3 = px.bar(comp_ubs.sort_values("Taxa (%)"), x="Taxa (%)", y="UBS", orientation="h", color="Taxa (%)", color_continuous_scale="Greens")
-        fig3.update_layout(showlegend=False, coloraxis_showscale=False, height=350)
-        st.plotly_chart(fig3, width='stretch')
+        st.divider()
+        st.subheader("Resumo por UBS")
+        comp_ubs = (
+            dff.groupby("ubs_name")["isCompleted"]
+            .apply(lambda x: x.mean() * 100 if x.count() > 0 else 0.0)
+            .reset_index(name="Taxa (%)")
+            .rename(columns={"ubs_name": "UBS"})
+        )
+        comp_lookup = comp_ubs.set_index("UBS")["Taxa (%)"].to_dict()
+        resumo = (
+            df_users.groupby("ubs_name")
+            .agg(
+                Participantes=("user_id", "nunique"),
+                PHQ9_media=("phq_score", "mean"),
+                GAD7_media=("gad_score", "mean"),
+            )
+            .reset_index()
+            .rename(columns={"ubs_name": "UBS"})
+        )
+        resumo["Conclusão (%)"] = resumo["UBS"].map(comp_lookup).round(1)
+        resumo["PHQ-9 Média"] = resumo["PHQ9_media"].round(1)
+        resumo["GAD-7 Média"] = resumo["GAD7_media"].round(1)
+        resumo = resumo[["UBS", "Participantes", "PHQ-9 Média", "GAD-7 Média", "Conclusão (%)"]].sort_values(
+            "Participantes", ascending=False
+        )
+        with st.expander("Ver tabela completa de resumo por UBS", expanded=True):
+            st.dataframe(resumo, width="stretch", hide_index=True)
+            # E.7-C.1 — CSV-07: resumo_por_ubs.csv
+            # Base: df_users agrupado por UBS (Participantes, PHQ-9, GAD-7, Taxa Conclusão). Sem RAW, sem PII direta.
+            st.caption("⚠️ Exportação para uso interno autorizado. Dashboard NÃO OPERACIONAL.")
+            st.download_button(
+                "⬇️ CSV — Resumo por UBS",
+                resumo.to_csv(index=False).encode("utf-8"),
+                "resumo_por_ubs.csv",
+                "text/csv",
+                key="dl_resumo",
+            )
 
-    with col4:
-        st.subheader("Distribuição de Gênero")
-        gender_map = {"F": "Feminino", "M": "Masculino"}
-        gender_counts = df_users["gender"].map(gender_map).fillna("Não informado").value_counts().reset_index()
-        gender_counts.columns = ["Gênero", "Contagem"]
-        fig4 = px.pie(gender_counts, names="Gênero", values="Contagem", hole=0.4, color_discrete_sequence=px.colors.qualitative.Set2)
-        fig4.update_layout(height=350)
-        st.plotly_chart(fig4, width='stretch')
+        # E.7-C.1 — CSV-01: resumo_municipios.csv
+        # Base: df_users (aderentes com filtros aplicados) agrupado por cidade. Sem RAW, sem PII direta.
+        resumo_mun = (
+            df_users.groupby("ubs_city")
+            .agg(
+                Participantes=("user_id", "nunique"),
+                UBSs=("ubs_name", "nunique"),
+                PHQ9_media=("phq_score", "mean"),
+                GAD7_media=("gad_score", "mean"),
+            )
+            .reset_index()
+            .rename(columns={"ubs_city": "Município"})
+        )
+        resumo_mun["PHQ-9 Média"] = resumo_mun["PHQ9_media"].round(1)
+        resumo_mun["GAD-7 Média"] = resumo_mun["GAD7_media"].round(1)
+        resumo_mun = resumo_mun[
+            ["Município", "Participantes", "UBSs", "PHQ-9 Média", "GAD-7 Média"]
+        ].sort_values("Participantes", ascending=False)
+        with st.expander("Resumo por Município", expanded=False):
+            st.dataframe(resumo_mun, width="stretch", hide_index=True)
+            st.caption("Denominador: participantes aderentes (df_main_users) com filtros de cidade/UBS aplicados.")
+            st.caption("⚠️ Exportação para uso interno autorizado. Dashboard NÃO OPERACIONAL.")
+            st.download_button(
+                "⬇️ CSV — Resumo por Município",
+                resumo_mun.to_csv(index=False).encode("utf-8"),
+                "resumo_municipios.csv",
+                "text/csv",
+                key="dl_mun",
+            )
 
-    with col5:
-        st.subheader("Distribuição de Idades")
-        ages = df_users["age"].dropna()
-        fig5 = px.histogram(ages, nbins=20, labels={"value": "Idade", "count": "Frequência"}, color_discrete_sequence=["#AB63FA"])
-        fig5.update_layout(showlegend=False, height=350, xaxis_title="Idade", yaxis_title="Frequência")
-        st.plotly_chart(fig5, width='stretch')
+    with tab_b:
+        col3, col4 = st.columns(2)
+        with col3:
+            st.subheader("Taxa de Conclusão por UBS")
+            comp_ubs = (
+                dff.groupby("ubs_name")["isCompleted"]
+                .apply(lambda x: x.mean() * 100 if x.count() > 0 else 0.0)
+                .reset_index(name="Taxa (%)")
+                .rename(columns={"ubs_name": "UBS"})
+            )
+            fig3 = px.bar(
+                comp_ubs.sort_values("Taxa (%)"),
+                x="Taxa (%)",
+                y="UBS",
+                orientation="h",
+                color="Taxa (%)",
+                color_continuous_scale="Greens",
+            )
+            fig3.update_layout(showlegend=False, coloraxis_showscale=False, height=380)
+            st.plotly_chart(fig3, width="stretch")
+            # E.7-C.1 — CSV-04: taxa_conclusao_por_ubs.csv
+            # Base: dff (sessões aderentes filtradas) agrupado por UBS. Sem RAW, sem PII direta.
+            st.caption("⚠️ Exportação para uso interno autorizado. Dashboard NÃO OPERACIONAL.")
+            st.download_button(
+                "⬇️ CSV — Taxa de Conclusão por UBS",
+                comp_ubs.to_csv(index=False).encode("utf-8"),
+                "taxa_conclusao_por_ubs.csv",
+                "text/csv",
+                key="dl_comp_ubs",
+            )
 
-    # --- Tabela resumo ---
-    st.markdown("---")
-    st.subheader("Resumo por UBS")
+        with col4:
+            st.subheader("Distribuição de Gênero")
+            gender_map = {"F": "Feminino", "M": "Masculino"}
+            gender_counts = (
+                df_users["gender"]
+                .map(gender_map)
+                .fillna("Não informado")
+                .value_counts()
+                .reset_index()
+            )
+            gender_counts.columns = ["Gênero", "Contagem"]
+            fig4 = px.pie(
+                gender_counts,
+                names="Gênero",
+                values="Contagem",
+                hole=0.4,
+                color_discrete_sequence=px.colors.qualitative.Set2,
+            )
+            fig4.update_layout(height=380)
+            st.plotly_chart(fig4, width="stretch")
+            # E.7-C.1 — CSV-05: distribuicao_genero.csv
+            # Base: df_users (aderentes). Sem RAW, sem PII direta.
+            st.caption("⚠️ Exportação para uso interno autorizado. Dashboard NÃO OPERACIONAL.")
+            st.download_button(
+                "⬇️ CSV — Distribuição de Gênero",
+                gender_counts.to_csv(index=False).encode("utf-8"),
+                "distribuicao_genero.csv",
+                "text/csv",
+                key="dl_gender",
+            )
 
-    comp_lookup = comp_ubs.set_index("UBS")["Taxa (%)"].to_dict()
-    resumo = df_users.groupby("ubs_name").agg(Participantes=("user_id", "nunique"), PHQ9_media=("phq_score", "mean"), GAD7_media=("gad_score", "mean")).reset_index().rename(columns={"ubs_name": "UBS"})
-    resumo["Conclusão (%)"] = resumo["UBS"].map(comp_lookup).round(1)
-    resumo["PHQ-9 Média"] = resumo["PHQ9_media"].round(1)
-    resumo["GAD-7 Média"] = resumo["GAD7_media"].round(1)
-    resumo = resumo[["UBS", "Participantes", "PHQ-9 Média", "GAD-7 Média", "Conclusão (%)"]].sort_values("Participantes", ascending=False)
-    st.dataframe(resumo, width='stretch', hide_index=True)
+        st.divider()
+        st.subheader("Distribuição por Faixa Etária")
+
+        age_order = ["< 18", "18–29", "30–39", "40–49", "50–59", "60–69", "70–79", "80+", "Não informado"]
+        age_data = (
+            df_users["age"]
+            .apply(age_group)
+            .value_counts()
+            .reindex(age_order, fill_value=0)
+            .reset_index()
+        )
+        age_data.columns = ["Faixa Etária", "Participantes"]
+        fig5 = px.bar(
+            age_data,
+            x="Faixa Etária",
+            y="Participantes",
+            color="Participantes",
+            color_continuous_scale="Purples",
+        )
+        fig5.update_layout(showlegend=False, coloraxis_showscale=False, height=360)
+        st.plotly_chart(fig5, width="stretch")
+        # E.7-C.1 — CSV-06: distribuicao_faixa_etaria.csv
+        # Base: df_users (aderentes). Sem RAW, sem PII direta.
+        st.caption("⚠️ Exportação para uso interno autorizado. Dashboard NÃO OPERACIONAL.")
+        st.download_button(
+            "⬇️ CSV — Distribuição por Faixa Etária",
+            age_data.to_csv(index=False).encode("utf-8"),
+            "distribuicao_faixa_etaria.csv",
+            "text/csv",
+            key="dl_ages",
+        )
+
+        st.caption("Calculado apenas sobre participantes aderentes (df_main_users).")
+
+        # -----------------------------------------------------------------------
+        # E.7-C.3 — Exportações dependentes de nova fonte canônica (placeholders)
+        # CSV-08, CSV-09, CSV-11, CSV-12, CSV-15
+        # Não implementar enquanto depender de RAW sem contrato canônico validado.
+        # Fontes ausentes: journeys_raw_latest, patient_feedback_raw_latest
+        # -----------------------------------------------------------------------
+        with st.expander("📤 Exportações pendentes de fonte canônica (E.7-C.3)", expanded=False):
+            st.info(
+                "Exportação preservada. Conteúdo pendente de fonte canônica validada."
+            )
+            st.caption("Dashboard NÃO OPERACIONAL.")
+            st.caption(
+                "Fontes ausentes na Fase E: `journeys_raw_latest`, `patient_feedback_raw_latest`. "
+                "Não implementar enquanto depender de RAW sem contrato canônico."
+            )
+            _c1, _c2, _c3 = st.columns(3)
+            # CSV-08: jornadas_por_tipo.csv — depende de journeys_raw_latest
+            _c1.download_button(
+                "⬇️ Jornadas por Tipo (indisponível)",
+                data=b"",
+                file_name="jornadas_por_tipo.csv",
+                mime="text/csv",
+                key="dl_jtype",
+                disabled=True,
+            )
+            # CSV-09: jornadas_por_ubs.csv — depende de journeys_raw_latest
+            _c2.download_button(
+                "⬇️ Jornadas por UBS (indisponível)",
+                data=b"",
+                file_name="jornadas_por_ubs.csv",
+                mime="text/csv",
+                key="dl_jubs",
+                disabled=True,
+            )
+            # CSV-11: feedback_por_tipo.csv — depende de patient_feedback_raw_latest
+            _c3.download_button(
+                "⬇️ Feedback por Tipo (indisponível)",
+                data=b"",
+                file_name="feedback_por_tipo.csv",
+                mime="text/csv",
+                key="dl_ftype",
+                disabled=True,
+            )
+            _c4, _c5, _c6 = st.columns(3)
+            # CSV-12: feedback_por_fonte.csv — depende de patient_feedback_raw_latest
+            _c4.download_button(
+                "⬇️ Feedback por Fonte (indisponível)",
+                data=b"",
+                file_name="feedback_por_fonte.csv",
+                mime="text/csv",
+                key="dl_fsource",
+                disabled=True,
+            )
+            # CSV-15: feedback_{id}.csv por participante — depende de patient_feedback_raw_latest
+            _c5.download_button(
+                "⬇️ Feedback por Participante (indisponível)",
+                data=b"",
+                file_name="feedback_participante.csv",
+                mime="text/csv",
+                key="dl_pfb_placeholder",
+                disabled=True,
+            )
+            # CSV-17 completo: sessoes_por_paciente.csv (versão completa) — depende de journeys_raw_latest
+            _c6.download_button(
+                "⬇️ Sessões por Paciente — completo (indisponível)",
+                data=b"",
+                file_name="sessoes_por_paciente_completo.csv",
+                mime="text/csv",
+                key="dl_sessoes_completo",
+                disabled=True,
+            )
+
+        # -----------------------------------------------------------------------
+        # E.7-C.4 — Exportações condicionadas a decisão explícita do professor
+        # CSV-10, CSV-13, CSV-16
+        # Motivo: user_id por linha, patientId, patientWhatsAppId, PHQ crítico, IGI atual.
+        # -----------------------------------------------------------------------
+        with st.expander("🔒 Exportações pendentes de deliberação (E.7-C.4)", expanded=False):
+            st.warning(
+                "Exportação condicionada à decisão do professor sobre dados sensíveis."
+            )
+            st.caption(
+                "Campos sensíveis envolvidos: `user_id` por linha, `patientId`, `patientWhatsAppId`, PHQ crítico, IGI atual."
+            )
+            st.caption(
+                "Nenhum código será escrito, nenhuma query executada, nenhum campo incluído "
+                "até que a deliberação formal seja registrada em `Docs/fase-e7c-incorporacao-csv-dashboard.md`."
+            )
+            _d1, _d2, _d3 = st.columns(3)
+            # CSV-10: jornadas_detalhes.csv — user_id por linha + timestamp acesso
+            _d1.download_button(
+                "⬇️ Jornadas Detalhes (deliberação pendente)",
+                data=b"",
+                file_name="jornadas_detalhes.csv",
+                mime="text/csv",
+                key="dl_jdetails",
+                disabled=True,
+            )
+            # CSV-13: feedbacks_recentes.csv — patientId, patientWhatsAppId
+            _d2.download_button(
+                "⬇️ Feedbacks Recentes (deliberação pendente)",
+                data=b"",
+                file_name="feedbacks_recentes.csv",
+                mime="text/csv",
+                key="dl_freq",
+                disabled=True,
+            )
+            # CSV-16: formulario_web_por_paciente.csv — PHQ crítico, IGI atual
+            _d3.download_button(
+                "⬇️ Formulário Web por Paciente (deliberação pendente)",
+                data=b"",
+                file_name="formulario_web_por_paciente.csv",
+                mime="text/csv",
+                key="dl_forms_web",
+                disabled=True,
+            )
 
 # ---------------------------------------------------------------------------
 # Governança — Monitoramento do grupo "Não Aderiu"
@@ -572,197 +967,265 @@ if page == "📊 Estatísticas por UBS":
 # aderiram plenamente ao protocolo clínico de inclusão/entrada do CONEMO.
 # Ref: Docs/nota-decisoria-nao-aderiu-dashboard.md
 # ---------------------------------------------------------------------------
-st.markdown("---")
-with st.expander("🔍 Governança — Qualidade de Dados (Não Aderiu)"):
-    st.markdown(
-        """
-        **Nota de Governança:**
-        
-        Usuários classificados como "Não Aderiu" não aderiram plenamente ao 
-        protocolo clínico de inclusão/entrada do CONEMO. Eles são monitorados 
-        apenas para governança e qualidade dos dados. **Não compõem os 
-        indicadores principais do dashboard** (que exibe 132 participantes aderentes).
-        """
-    )
-    
-    st.markdown("---")
-    
-    if df_nao_aderiu.empty:
-        st.info("Nenhum usuário registrado no grupo 'Não Aderiu'.")
-    else:
-        # Métricas agregadas (sem PII, apenas contagens)
-        col_g1, col_g2, col_g3 = st.columns(3)
-        
-        total_nao_aderiu = df_nao_aderiu["user_id"].nunique()
-        total_geral = df_all["user_id"].nunique()
-        pct_nao_aderiu = (total_nao_aderiu / total_geral * 100) if total_geral > 0 else 0
-        
-        col_g1.metric("Total — Não Aderiu", total_nao_aderiu)
-        col_g2.metric("% do Total Interno", f"{pct_nao_aderiu:.1f}%")
-        
-        # Breakdown: com/sem score
-        nao_aderiu_com_score = (
-            df_nao_aderiu[
-                (df_nao_aderiu["phq_score"].notna()) | (df_nao_aderiu["gad_score"].notna())
-            ]["user_id"].nunique()
-        )
-        nao_aderiu_sem_score = total_nao_aderiu - nao_aderiu_com_score
-        col_g3.metric("Sem Score PHQ/GAD", nao_aderiu_sem_score)
-        
-        col_g4, col_g5 = st.columns(2)
-        col_g4.metric("Com algum Score PHQ/GAD", nao_aderiu_com_score)
-        
-        # Critério de classificação: health_unit_key
-        nao_aderiu_unk_uhs = (
-            df_nao_aderiu[df_nao_aderiu["health_unit_key"] == "UNK_UHS"]["user_id"].nunique()
-        )
-        col_g5.metric("health_unit_key = UNK_UHS", nao_aderiu_unk_uhs)
-        
-        st.markdown("---")
-        
-        # Distribuição temporal (agregado por mês)
-        st.subheader("Distribuição Temporal — Entrada de Não Aderentes")
-        if "created_at" in df_nao_aderiu.columns:
-            df_temporal = df_nao_aderiu.copy()
-            df_temporal["created_at"] = pd.to_datetime(df_temporal["created_at"], errors="coerce")
-            df_temporal["mes_entrada"] = df_temporal["created_at"].dt.strftime("%Y-%m")
-            temporal_agg = df_temporal.groupby("mes_entrada")["user_id"].nunique().reset_index()
-            temporal_agg.columns = ["Mês", "Contagem"]
-            temporal_agg = temporal_agg.sort_values("Mês")
+if page == "🔍 Governança — Não Aderiu":
+    st.title("Governança — Não Aderiu")
+    _status_caption("Governança (Não Aderiu)")
+    st.divider()
+
+    with st.expander("🔍 Governança — Qualidade de Dados (Não Aderiu)", expanded=True):
+        st.markdown(
+            """
+            **Nota de Governança:**
             
-            fig_temporal = px.bar(
-                temporal_agg,
-                x="Mês",
-                y="Contagem",
-                color="Contagem",
-                color_continuous_scale="Blues",
-                title="Entrada de Usuários — Não Aderiu"
-            )
-            fig_temporal.update_layout(height=300, showlegend=False)
-            st.plotly_chart(fig_temporal, width='stretch')
+            Usuários classificados como "Não Aderiu" não aderiram plenamente ao 
+            protocolo clínico de inclusão/entrada do CONEMO. Eles são monitorados 
+            apenas para governança e qualidade dos dados. **Não compõem os 
+            indicadores principais do dashboard** (que exibe 132 participantes aderentes).
+            """
+        )
         
         st.markdown("---")
         
-        # Status territorial (agregado)
-        st.subheader("Status Territorial — Não Aderentes")
-        if "ubs_status" in df_nao_aderiu.columns:
-            ubs_status_counts = df_nao_aderiu["ubs_status"].value_counts().reset_index()
-            ubs_status_counts.columns = ["Status", "Contagem"]
-            fig_ubs_status = px.pie(
-                ubs_status_counts,
-                names="Status",
-                values="Contagem",
-                hole=0.4,
-                title="Distribuição — Status Territorial"
+        if df_nao_aderiu.empty:
+            st.info("Nenhum usuário registrado no grupo 'Não Aderiu'.")
+        else:
+            # Métricas agregadas (sem PII, apenas contagens)
+            col_g1, col_g2, col_g3 = st.columns(3)
+            
+            total_nao_aderiu = df_nao_aderiu["user_id"].nunique()
+            total_geral = df_all["user_id"].nunique()
+            pct_nao_aderiu = (total_nao_aderiu / total_geral * 100) if total_geral > 0 else 0
+            
+            col_g1.metric("Total — Não Aderiu", total_nao_aderiu)
+            col_g2.metric("% do Total Interno", f"{pct_nao_aderiu:.1f}%")
+            
+            # Breakdown: com/sem score
+            nao_aderiu_com_score = (
+                df_nao_aderiu[
+                    (df_nao_aderiu["phq_score"].notna()) | (df_nao_aderiu["gad_score"].notna())
+                ]["user_id"].nunique()
             )
-            fig_ubs_status.update_layout(height=300)
-            st.plotly_chart(fig_ubs_status, width='stretch')
-        
-        st.markdown("---")
-        
-        # Intervalo de data
-        if "created_at" in df_nao_aderiu.columns:
-            df_temporal_check = df_nao_aderiu.copy()
-            df_temporal_check["created_at"] = pd.to_datetime(df_temporal_check["created_at"], errors="coerce")
-            data_min = df_temporal_check["created_at"].min()
-            data_max = df_temporal_check["created_at"].max()
-            st.info(
-                f"**Intervalo de Entrada:** {data_min.strftime('%d/%m/%Y %H:%M') if pd.notna(data_min) else 'N/D'} "
-                f"até {data_max.strftime('%d/%m/%Y %H:%M') if pd.notna(data_max) else 'N/D'}"
+            nao_aderiu_sem_score = total_nao_aderiu - nao_aderiu_com_score
+            col_g3.metric("Sem Score PHQ/GAD", nao_aderiu_sem_score)
+            
+            col_g4, col_g5 = st.columns(2)
+            col_g4.metric("Com algum Score PHQ/GAD", nao_aderiu_com_score)
+            
+            # Critério de classificação: health_unit_key
+            nao_aderiu_unk_uhs = (
+                df_nao_aderiu[df_nao_aderiu["health_unit_key"] == "UNK_UHS"]["user_id"].nunique()
             )
+            col_g5.metric("health_unit_key = UNK_UHS", nao_aderiu_unk_uhs)
+            
+            st.markdown("---")
+            
+            # Distribuição temporal (agregado por mês)
+            st.subheader("Distribuição Temporal — Entrada de Não Aderentes")
+            if "created_at" in df_nao_aderiu.columns:
+                df_temporal = df_nao_aderiu.copy()
+                df_temporal["created_at"] = pd.to_datetime(df_temporal["created_at"], errors="coerce")
+                df_temporal["mes_entrada"] = df_temporal["created_at"].dt.strftime("%Y-%m")
+                temporal_agg = df_temporal.groupby("mes_entrada")["user_id"].nunique().reset_index()
+                temporal_agg.columns = ["Mês", "Contagem"]
+                temporal_agg = temporal_agg.sort_values("Mês")
+                
+                fig_temporal = px.bar(
+                    temporal_agg,
+                    x="Mês",
+                    y="Contagem",
+                    color="Contagem",
+                    color_continuous_scale="Blues",
+                    title="Entrada de Usuários — Não Aderiu",
+                )
+                fig_temporal.update_layout(height=300, showlegend=False)
+                st.plotly_chart(fig_temporal, width="stretch")
+            
+            st.markdown("---")
+            
+            # Status territorial (agregado)
+            st.subheader("Status Territorial — Não Aderentes")
+            if "ubs_status" in df_nao_aderiu.columns:
+                ubs_status_counts = df_nao_aderiu["ubs_status"].value_counts().reset_index()
+                ubs_status_counts.columns = ["Status", "Contagem"]
+                fig_ubs_status = px.pie(
+                    ubs_status_counts,
+                    names="Status",
+                    values="Contagem",
+                    hole=0.4,
+                    title="Distribuição — Status Territorial",
+                )
+                fig_ubs_status.update_layout(height=300)
+                st.plotly_chart(fig_ubs_status, width="stretch")
+            
+            st.markdown("---")
+            
+            # Intervalo de data
+            if "created_at" in df_nao_aderiu.columns:
+                df_temporal_check = df_nao_aderiu.copy()
+                df_temporal_check["created_at"] = pd.to_datetime(df_temporal_check["created_at"], errors="coerce")
+                data_min = df_temporal_check["created_at"].min()
+                data_max = df_temporal_check["created_at"].max()
+                st.info(
+                    f"**Intervalo de Entrada:** {data_min.strftime('%d/%m/%Y %H:%M') if pd.notna(data_min) else 'N/D'} "
+                    f"até {data_max.strftime('%d/%m/%Y %H:%M') if pd.notna(data_max) else 'N/D'}"
+                )
 
 # ---------------------------------------------------------------------------
 # Visão individual por participante
 # ---------------------------------------------------------------------------
-st.markdown("---")
-with st.expander("👤 Consulta individual por participante (visão auxiliar)"):
-    st.subheader("Estatísticas por Participante")
-    user_ids = sorted(df["user_id"].dropna().unique())
-    selected_id = st.selectbox("Selecione o ID do participante", user_ids)
+if page == "👤 Consulta auxiliar":
+    st.title("Consulta auxiliar por participante")
+    _status_caption("Consulta auxiliar")
+    st.divider()
 
-    df_user = df[df["user_id"] == selected_id]
-    if df_user.empty:
-        st.warning("Participante não encontrado.")
-    else:
-        row = df_user.iloc[0]
-        st.markdown("---")
-        st.subheader("Perfil")
+    with st.expander("👤 Consulta individual por participante (visão auxiliar)", expanded=True):
+        st.subheader("Estatísticas por Participante")
+        user_ids = sorted(df["user_id"].dropna().unique())
+        selected_id = st.selectbox("Selecione o ID do participante", user_ids)
 
-        gender_label = {"F": "Feminino", "M": "Masculino"}.get(str(row.get("gender", "")), "Não informado")
-        age_str = f"{int(row['age'])} anos" if pd.notna(row.get("age")) else "N/D"
-        email_raw = str(row.get("email", "N/D"))
-        if "@" in email_raw:
-            local, domain = email_raw.split("@", 1)
-            email_masked = local[:3] + "***@" + domain
+        df_user = df[df["user_id"] == selected_id]
+        if df_user.empty:
+            st.warning("Participante não encontrado.")
         else:
-            email_masked = email_raw
+            row = df_user.iloc[0]
+            st.markdown("---")
+            st.subheader("Perfil")
 
-        p1, p2, p3, p4, p5 = st.columns(5)
-        p1.metric("UBS", row.get("ubs_name", "N/D"))
-        p2.metric("Cidade", row.get("ubs_city", "N/D"))
-        p3.metric("Gênero", gender_label)
-        p4.metric("Idade", age_str)
-        p5.metric("E-mail", email_masked)
-
-        # Scores Atuais
-        st.markdown("---")
-        st.subheader("Scores de Saúde Mental (Representação Atual)")
-        phq = row.get("phq_score")
-        gad = row.get("gad_score")
-        phq_label, gad_label = phq_severity(phq), gad_severity(gad)
-        sc1, sc2 = st.columns(2)
-
-        with sc1:
-            phq_val = float(phq) if phq is not None else 0
-            fig_phq = go.Figure(go.Indicator(mode="gauge+number", value=phq_val, title={"text": f"PHQ-9 — {phq_label}"}, gauge={"axis": {"range": [0, 27]}, "bar": {"color": "#EF553B"}, "steps": [{"range": [0, 4], "color": "#d4edda"}, {"range": [4, 9], "color": "#fff3cd"}, {"range": [9, 14], "color": "#ffd8b1"}, {"range": [14, 19], "color": "#f8d7da"}, {"range": [19, 27], "color": "#c0392b"}]}))
-            fig_phq.update_layout(height=280)
-            st.plotly_chart(fig_phq, width='stretch')
-
-        with sc2:
-            gad_val = float(gad) if gad is not None else 0
-            fig_gad = go.Figure(go.Indicator(mode="gauge+number", value=gad_val, title={"text": f"GAD-7 — {gad_label}"}, gauge={"axis": {"range": [0, 21]}, "bar": {"color": "#636EFA"}, "steps": [{"range": [0, 4], "color": "#d4edda"}, {"range": [4, 9], "color": "#fff3cd"}, {"range": [9, 14], "color": "#f8d7da"}, {"range": [14, 21], "color": "#c0392b"}]}))
-            fig_gad.update_layout(height=280)
-            st.plotly_chart(fig_gad, width='stretch')
-
-        # Histórico Longitudinal (Fase D.4)
-        st.markdown("---")
-        st.subheader("📜 Histórico Longitudinal PHQ/GAD")
-        
-        # Carrega histórico apenas se estiver em modo BigQuery
-        if st.session_state.get("bq_success", False):
-            df_history = load_history_from_bigquery(selected_id)
-            if not df_history.empty:
-                st.dataframe(
-                    df_history[["instrument", "score", "data_avaliacao", "status_score", "contexto"]].rename(
-                        columns={
-                            "instrument": "Instrumento",
-                            "score": "Score",
-                            "data_avaliacao": "Data da Avaliação",
-                            "status_score": "Status",
-                            "contexto": "Origem/Contexto"
-                        }
-                    ),
-                    width='stretch',
-                    hide_index=True
-                )
+            gender_label = {"F": "Feminino", "M": "Masculino"}.get(str(row.get("gender", "")), "Não informado")
+            age_str = f"{int(row['age'])} anos" if pd.notna(row.get("age")) else "N/D"
+            email_raw = str(row.get("email", "N/D"))
+            if "@" in email_raw:
+                local, domain = email_raw.split("@", 1)
+                email_masked = local[:3] + "***@" + domain
             else:
-                st.info("Nenhum histórico adicional encontrado para este participante.")
-        else:
-            st.info("Histórico longitudinal disponível apenas na conexão BigQuery (Modo Canônico).")
+                email_masked = email_raw
 
-        # Progresso das Sessões
-        st.markdown("---")
-        st.subheader("Progresso das Sessões")
-        sessions = df_user.drop_duplicates(subset="sessionNumber").sort_values("sessionNumber")[["sessionNumber", "isCompleted", "completedDate"]].copy()
-        total_sess, done_sess = len(sessions), int(sessions["isCompleted"].sum())
-        s1, s2, s3 = st.columns(3)
-        s1.metric("Total de sessões", total_sess)
-        s2.metric("Concluídas", done_sess)
-        s3.metric("Taxa de conclusão", f"{done_sess/total_sess*100:.0f}%" if total_sess > 0 else "N/D")
+            p1, p2, p3, p4, p5 = st.columns(5)
+            p1.metric("UBS", row.get("ubs_name", "N/D"))
+            p2.metric("Cidade", row.get("ubs_city", "N/D"))
+            p3.metric("Gênero", gender_label)
+            p4.metric("Idade", age_str)
+            p5.metric("E-mail", email_masked)
 
-        sessions["Status"] = sessions["isCompleted"].map({True: "Concluída", False: "Não concluída", None: "N/D"}).fillna("N/D")
-        sessions = sessions.dropna(subset=["sessionNumber"])
-        sessions["Sessão"] = "Sessão " + sessions["sessionNumber"].astype(int).astype(str)
-        fig_sess = px.bar(sessions, x="Sessão", y=[1] * len(sessions), color="Status", color_discrete_map={"Concluída": "#2ecc71", "Não concluída": "#e74c3c", "N/D": "#bdc3c7"}, height=220)
-        fig_sess.update_yaxes(visible=False)
-        st.plotly_chart(fig_sess, width='stretch')
+            # Scores Atuais
+            st.markdown("---")
+            st.subheader("Scores de Saúde Mental (Representação Atual)")
+            phq = row.get("phq_score")
+            gad = row.get("gad_score")
+            phq_label, gad_label = phq_severity(phq), gad_severity(gad)
+            sc1, sc2 = st.columns(2)
+
+            with sc1:
+                phq_val = float(phq) if phq is not None else 0
+                fig_phq = go.Figure(go.Indicator(mode="gauge+number", value=phq_val, title={"text": f"PHQ-9 — {phq_label}"}, gauge={"axis": {"range": [0, 27]}, "bar": {"color": "#EF553B"}, "steps": [{"range": [0, 4], "color": "#d4edda"}, {"range": [4, 9], "color": "#fff3cd"}, {"range": [9, 14], "color": "#ffd8b1"}, {"range": [14, 19], "color": "#f8d7da"}, {"range": [19, 27], "color": "#c0392b"}]}))
+                fig_phq.update_layout(height=280)
+                st.plotly_chart(fig_phq, width='stretch')
+
+            with sc2:
+                gad_val = float(gad) if gad is not None else 0
+                fig_gad = go.Figure(go.Indicator(mode="gauge+number", value=gad_val, title={"text": f"GAD-7 — {gad_label}"}, gauge={"axis": {"range": [0, 21]}, "bar": {"color": "#636EFA"}, "steps": [{"range": [0, 4], "color": "#d4edda"}, {"range": [4, 9], "color": "#fff3cd"}, {"range": [9, 14], "color": "#f8d7da"}, {"range": [14, 21], "color": "#c0392b"}]}))
+                fig_gad.update_layout(height=280)
+                st.plotly_chart(fig_gad, width='stretch')
+
+            # Histórico Longitudinal (Fase D.4)
+            st.markdown("---")
+            st.subheader("📜 Histórico Longitudinal PHQ/GAD")
+            
+            # Carrega histórico apenas se estiver em modo BigQuery
+            if st.session_state.get("bq_success", False):
+                df_history = load_history_from_bigquery(selected_id)
+                if not df_history.empty:
+                    st.dataframe(
+                        df_history[["instrument", "score", "data_avaliacao", "status_score", "contexto"]].rename(
+                            columns={
+                                "instrument": "Instrumento",
+                                "score": "Score",
+                                "data_avaliacao": "Data da Avaliação",
+                                "status_score": "Status",
+                                "contexto": "Origem/Contexto"
+                            }
+                        ),
+                        width='stretch',
+                        hide_index=True
+                    )
+                else:
+                    st.info("Nenhum histórico adicional encontrado para este participante.")
+            else:
+                st.info("Histórico longitudinal disponível apenas na conexão BigQuery (Modo Canônico).")
+
+            # Progresso das Sessões
+            st.markdown("---")
+            st.subheader("Progresso das Sessões")
+            sessions = df_user.drop_duplicates(subset="sessionNumber").sort_values("sessionNumber")[["sessionNumber", "isCompleted", "completedDate"]].copy()
+            total_sess, done_sess = len(sessions), int(sessions["isCompleted"].sum())
+            s1, s2, s3 = st.columns(3)
+            s1.metric("Total de sessões", total_sess)
+            s2.metric("Concluídas", done_sess)
+            s3.metric("Taxa de conclusão", f"{done_sess/total_sess*100:.0f}%" if total_sess > 0 else "N/D")
+
+            sessions["Status"] = sessions["isCompleted"].map({True: "Concluída", False: "Não concluída", None: "N/D"}).fillna("N/D")
+            sessions = sessions.dropna(subset=["sessionNumber"])
+            sessions["Sessão"] = "Sessão " + sessions["sessionNumber"].astype(int).astype(str)
+            fig_sess = px.bar(sessions, x="Sessão", y=[1] * len(sessions), color="Status", color_discrete_map={"Concluída": "#2ecc71", "Não concluída": "#e74c3c", "N/D": "#bdc3c7"}, height=220)
+            fig_sess.update_yaxes(visible=False)
+            st.plotly_chart(fig_sess, width='stretch')
+
+            # E.7-C.2 — CSV-14: sessoes_{id}.csv
+            # Base: sessões do participante selecionado, da consulta auxiliar canônica.
+            # Finalidade: acompanhamento clínico por equipe da UBS.
+            # PII permitida (finalidade assistencial autorizada). Controle por perfil e log
+            # de exportações serão implementados antes da operacionalização.
+            with st.expander("Ver tabela de sessões e exportar"):
+                tbl_sessions_csv = sessions[["Sessão", "Status", "completedDate"]].rename(
+                    columns={"completedDate": "Data de conclusão"}
+                )
+                st.dataframe(tbl_sessions_csv, width="stretch", hide_index=True)
+                st.caption(
+                    "⚠️ Exportação clínico-operacional para uso interno autorizado. "
+                    "Finalidade: acompanhamento de sessões por equipe clínica da UBS. Dashboard NÃO OPERACIONAL."
+                )
+                st.caption("Controle por perfil e log de exportações serão implementados antes da operacionalização.")
+                st.download_button(
+                    "⬇️ CSV — Sessões deste participante",
+                    tbl_sessions_csv.to_csv(index=False).encode("utf-8"),
+                    f"sessoes_{selected_id}.csv",
+                    "text/csv",
+                    key="dl_sessions",
+                )
+
+        # E.7-C.2 — CSV-17 parcial: sessoes_por_paciente.csv (versão parcial sem jornadas RAW)
+        # Base: df_main (aderentes). Resumo de sessões por participante sem fonte RAW nova.
+        # Finalidade: acompanhamento clínico agregado por UBS.
+        # Controle por perfil e log de exportações serão implementados antes da operacionalização.
+        with st.expander("📋 Resumo de sessões — todos os participantes aderentes (E.7-C.2)", expanded=False):
+            st.caption(
+                "Exportação parcial (sem dados de jornadas RAW). "
+                "Versão completa pendente de fonte canônica (`journeys_raw_latest`). Dashboard NÃO OPERACIONAL."
+            )
+            sessoes_por_pac = (
+                df_main.groupby("user_id")
+                .agg(
+                    UBS=("ubs_name", "first"),
+                    Cidade=("ubs_city", "first"),
+                    Total_Sessoes=("sessionNumber", "nunique"),
+                    Sessoes_Concluidas=("isCompleted", lambda x: int(x.sum())),
+                )
+                .reset_index()
+                .rename(columns={"user_id": "Participante"})
+            )
+            sessoes_por_pac["Taxa_Conclusao_pct"] = (
+                sessoes_por_pac["Sessoes_Concluidas"] / sessoes_por_pac["Total_Sessoes"] * 100
+            ).round(1)
+            st.dataframe(sessoes_por_pac, width="stretch", hide_index=True)
+            st.caption(
+                "⚠️ Exportação clínico-operacional para uso interno autorizado. "
+                "Finalidade assistencial/operacional CONEMO."
+            )
+            st.caption("Controle por perfil e log de exportações serão implementados antes da operacionalização.")
+            st.download_button(
+                "⬇️ CSV — Sessões por Participante (parcial)",
+                sessoes_por_pac.to_csv(index=False).encode("utf-8"),
+                "sessoes_por_paciente.csv",
+                "text/csv",
+                key="dl_sessoes",
+            )
