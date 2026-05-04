@@ -553,6 +553,29 @@ def age_group(age_value):
         return "70–79"
     return "80+"
 
+
+def normalize_gender(value) -> str:
+    """
+    Normaliza valores de gênero para exibição agregada.
+    Cobre formatos do mart curado (FEMININO/MASCULINO/NAO_INFORMADO)
+    e do raw Firestore (F/M), sem expor dados individuais.
+    Beta-E: correção de regressão de mapeamento.
+    """
+    if pd.isna(value):
+        return "Não informado"
+    v = str(value).strip().upper()
+    if v in ("F", "FEMININO", "FEMALE", "MULHER", "WOMAN", "2"):
+        return "Feminino"
+    if v in ("M", "MASCULINO", "MALE", "HOMEM", "MAN", "1"):
+        return "Masculino"
+    if v in ("OUTRO", "OUTROS", "OTHER", "NAO_BINARIO", "NON-BINARY"):
+        return "Outro"
+    if v in ("", "NAN", "NONE", "NULL", "N/A", "NA", "NAO_INFORMADO",
+             "NÃO INFORMADO", "NAO INFORMADO", "NOT_INFORMED"):
+        return "Não informado"
+    return "Não informado"
+
+
 def _status_caption(page_label: str) -> None:
     st.caption(
         f"**{page_label}** — dashboard permanece **NÃO OPERACIONAL**. "
@@ -832,11 +855,11 @@ if page == "📊 Estatísticas por UBS":
 
         with col4:
             st.subheader("Distribuição de Gênero")
-            gender_map = {"F": "Feminino", "M": "Masculino"}
+            # Beta-E: usa normalize_gender para cobrir valores do mart curado
+            # (FEMININO/MASCULINO/NAO_INFORMADO) e do raw (F/M).
             gender_counts = (
                 df_users["gender"]
-                .map(gender_map)
-                .fillna("Não informado")
+                .apply(normalize_gender)
                 .value_counts()
                 .reset_index()
             )
@@ -1143,7 +1166,7 @@ if page == "👤 Consulta auxiliar":
             st.markdown("---")
             st.subheader("Perfil")
 
-            gender_label = {"F": "Feminino", "M": "Masculino"}.get(str(row.get("gender", "")), "Não informado")
+            gender_label = normalize_gender(row.get("gender", ""))
             age_str = f"{int(row['age'])} anos" if pd.notna(row.get("age")) else "N/D"
             email_raw = str(row.get("email", "N/D"))
             if "@" in email_raw:
