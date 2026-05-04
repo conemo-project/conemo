@@ -446,6 +446,7 @@ df_all = load_data()
 # - não criar nova seção visual nesta etapa.
 # ---------------------------------------------------------------------------
 if "conemo_protocol_status" in df_all.columns:
+    # Domínio analítico principal (Aderiu), sem alterar regra canônica.
     df_main = df_all[df_all["conemo_protocol_status"] == "Aderiu"].copy()
 else:
     # Fallback seguro: sem status de adesão, bloquear análises principais
@@ -455,16 +456,42 @@ else:
 
 # Etapa 4 — Seção separada de monitoramento agregado do grupo Não Aderiu
 if "conemo_protocol_status" in df_all.columns:
+    # Domínio de governança (Não Aderiu), isolado do denominador analítico.
     df_nao_aderiu = df_all[df_all["conemo_protocol_status"] == "Não Aderiu"].copy()
 else:
     # Fallback defensivo: sem coluna de status, seção agregada fica vazia.
     df_nao_aderiu = df_all.iloc[0:0].copy()
 
-# Mantém alias legado para blocos auxiliares já existentes
-df = df_all
-
 # Base aderente explícita para todo componente analítico principal
-df_main_users = df_main.drop_duplicates(subset="user_id")
+df_main_users = df_main.drop_duplicates(subset="user_id").copy()
+
+# Aliases semânticos explícitos (Beta-F): legibilidade sem nova regra de negócio.
+# - df_analysis_events: domínio analítico de eventos/sessões (Aderiu)
+# - df_analysis_users: domínio analítico de usuários únicos (Aderiu)
+# - df_governance_nao_aderiu: domínio separado de governança (Não Aderiu)
+df_analysis_events = df_main
+df_analysis_users = df_main_users
+df_governance_nao_aderiu = df_nao_aderiu
+
+# Mantém alias legado, porém restrito ao domínio analítico (Aderiu).
+df = df_analysis_events
+
+# Guardas de integridade do domínio analítico (Beta-F)
+if (not df_analysis_events.empty) and (not df_analysis_events["conemo_protocol_status"].eq("Aderiu").all()):
+    st.error("Erro de integridade: domínio analítico contém registros fora de Aderiu.")
+    st.stop()
+
+if "created_at" in df_analysis_events.columns:
+    _created_at = pd.to_datetime(df_analysis_events["created_at"], errors="coerce", utc=True)
+    min_created = _created_at.min()
+    if pd.notna(min_created) and min_created < pd.Timestamp(DASHBOARD_CUTOFF_TS):
+        st.error("Erro de integridade: domínio analítico contém registros antes de 2026-01-28.")
+        st.stop()
+elif "created_at_seconds" in df_analysis_events.columns:
+    min_created_seconds = pd.to_numeric(df_analysis_events["created_at_seconds"], errors="coerce").min()
+    if pd.notna(min_created_seconds) and float(min_created_seconds) < float(DASHBOARD_CUTOFF_SECONDS):
+        st.error("Erro de integridade: domínio analítico contém registros antes de 2026-01-28.")
+        st.stop()
 
 # ---------------------------------------------------------------------------
 # Sidebar — navegação, timestamp e botão de atualização
@@ -631,7 +658,7 @@ if page == "📊 Estatísticas por UBS":
     st.title("Estatísticas por UBS")
     _status_caption("Tela central (UBS)")
 
-    critical_issues, warnings = validate_runtime_contract(df_all, df_main, df_nao_aderiu, df_main_users)
+    critical_issues, warnings = validate_runtime_contract(df_all, df_analysis_events, df_governance_nao_aderiu, df_analysis_users)
     for msg in warnings:
         st.warning(msg)
     if critical_issues:
@@ -646,7 +673,7 @@ if page == "📊 Estatísticas por UBS":
     with st.container():
         st.subheader("Usuários Ativos")
         col_f1, col_f2 = st.columns(2)
-        all_cities = sorted(df_main_users["ubs_city"].dropna().unique())
+        all_cities = sorted(df_analysis_users["ubs_city"].dropna().unique())
         sel_cities = col_f1.multiselect(
             "Cidade",
             all_cities,
@@ -654,8 +681,8 @@ if page == "📊 Estatísticas por UBS":
             key="filtro_cidade_aderiu_v2",
         )
 
-        df_city = df_main[df_main["ubs_city"].isin(sel_cities)] if sel_cities else df_main
-        df_city_users = df_main_users[df_main_users["ubs_city"].isin(sel_cities)] if sel_cities else df_main_users
+        df_city = df_analysis_events[df_analysis_events["ubs_city"].isin(sel_cities)] if sel_cities else df_analysis_events
+        df_city_users = df_analysis_users[df_analysis_users["ubs_city"].isin(sel_cities)] if sel_cities else df_analysis_users
         all_ubs = sorted(df_city_users["ubs_name"].dropna().unique())
         sel_ubs = col_f2.multiselect(
             "UBS",
@@ -668,9 +695,9 @@ if page == "📊 Estatísticas por UBS":
 
     # DataFrame de participantes únicos (base aderente explícita)
     df_users = df_city_users[df_city_users["ubs_name"].isin(sel_ubs)] if sel_ubs else df_city_users
-    if (not df_users.empty) and (not df_main_users.empty):
-        if not set(df_users["user_id"].unique()).issubset(set(df_main_users["user_id"].unique())):
-            st.error("Violação de denominador: `df_users` não é subconjunto de `df_main_users` (bloqueio local).")
+    if (not df_users.empty) and (not df_analysis_users.empty):
+        if not set(df_users["user_id"].unique()).issubset(set(df_analysis_users["user_id"].unique())):
+            st.error("Violação de denominador: `df_users` não é subconjunto de `df_analysis_users` (bloqueio local).")
             st.stop()
 
     st.divider()
@@ -1048,6 +1075,7 @@ if page == "🔍 Governança — Não Aderiu":
     st.divider()
 
     with st.expander("🔍 Governança — Qualidade de Dados (Não Aderiu)", expanded=True):
+        st.caption("Esta página é de governança e usa o domínio Não Aderiu. Ela não compõe o denominador analítico principal das métricas por UBS.")
         st.markdown(
             """
             **Nota de Governança:**
@@ -1061,14 +1089,15 @@ if page == "🔍 Governança — Não Aderiu":
         
         st.markdown("---")
         
-        if df_nao_aderiu.empty:
+        if df_governance_nao_aderiu.empty:
             st.info("Nenhum usuário registrado no grupo 'Não Aderiu'.")
         else:
             # Métricas agregadas (sem PII, apenas contagens)
             col_g1, col_g2, col_g3 = st.columns(3)
             
-            total_nao_aderiu = df_nao_aderiu["user_id"].nunique()
-            total_geral = df_all["user_id"].nunique()
+            total_nao_aderiu = df_governance_nao_aderiu["user_id"].nunique()
+            total_aderiu = df_analysis_users["user_id"].nunique()
+            total_geral = total_aderiu + total_nao_aderiu
             pct_nao_aderiu = (total_nao_aderiu / total_geral * 100) if total_geral > 0 else 0
             
             col_g1.metric("Total — Não Aderiu", total_nao_aderiu)
@@ -1076,8 +1105,8 @@ if page == "🔍 Governança — Não Aderiu":
             
             # Breakdown: com/sem score
             nao_aderiu_com_score = (
-                df_nao_aderiu[
-                    (df_nao_aderiu["phq_score"].notna()) | (df_nao_aderiu["gad_score"].notna())
+                df_governance_nao_aderiu[
+                    (df_governance_nao_aderiu["phq_score"].notna()) | (df_governance_nao_aderiu["gad_score"].notna())
                 ]["user_id"].nunique()
             )
             nao_aderiu_sem_score = total_nao_aderiu - nao_aderiu_com_score
@@ -1088,7 +1117,7 @@ if page == "🔍 Governança — Não Aderiu":
             
             # Critério de classificação: health_unit_key
             nao_aderiu_unk_uhs = (
-                df_nao_aderiu[df_nao_aderiu["health_unit_key"] == "UNK_UHS"]["user_id"].nunique()
+                df_governance_nao_aderiu[df_governance_nao_aderiu["health_unit_key"] == "UNK_UHS"]["user_id"].nunique()
             )
             col_g5.metric("health_unit_key = UNK_UHS", nao_aderiu_unk_uhs)
             
@@ -1096,8 +1125,8 @@ if page == "🔍 Governança — Não Aderiu":
             
             # Distribuição temporal (agregado por mês)
             st.subheader("Distribuição Temporal — Entrada de Não Aderentes")
-            if "created_at" in df_nao_aderiu.columns:
-                df_temporal = df_nao_aderiu.copy()
+            if "created_at" in df_governance_nao_aderiu.columns:
+                df_temporal = df_governance_nao_aderiu.copy()
                 df_temporal["created_at"] = pd.to_datetime(df_temporal["created_at"], errors="coerce")
                 df_temporal["mes_entrada"] = df_temporal["created_at"].dt.strftime("%Y-%m")
                 temporal_agg = df_temporal.groupby("mes_entrada")["user_id"].nunique().reset_index()
@@ -1119,8 +1148,8 @@ if page == "🔍 Governança — Não Aderiu":
             
             # Status territorial (agregado)
             st.subheader("Status Territorial — Não Aderentes")
-            if "ubs_status" in df_nao_aderiu.columns:
-                ubs_status_counts = df_nao_aderiu["ubs_status"].value_counts().reset_index()
+            if "ubs_status" in df_governance_nao_aderiu.columns:
+                ubs_status_counts = df_governance_nao_aderiu["ubs_status"].value_counts().reset_index()
                 ubs_status_counts.columns = ["Status", "Contagem"]
                 fig_ubs_status = px.pie(
                     ubs_status_counts,
@@ -1135,8 +1164,8 @@ if page == "🔍 Governança — Não Aderiu":
             st.markdown("---")
             
             # Intervalo de data
-            if "created_at" in df_nao_aderiu.columns:
-                df_temporal_check = df_nao_aderiu.copy()
+            if "created_at" in df_governance_nao_aderiu.columns:
+                df_temporal_check = df_governance_nao_aderiu.copy()
                 df_temporal_check["created_at"] = pd.to_datetime(df_temporal_check["created_at"], errors="coerce")
                 data_min = df_temporal_check["created_at"].min()
                 data_max = df_temporal_check["created_at"].max()
@@ -1155,10 +1184,14 @@ if page == "👤 Consulta auxiliar":
 
     with st.expander("👤 Consulta individual por participante (visão auxiliar)", expanded=True):
         st.subheader("Estatísticas por Participante")
-        user_ids = sorted(df["user_id"].dropna().unique())
+        # Consulta auxiliar padrão restrita ao domínio analítico (Aderiu).
+        df_aux_users = df_analysis_users.copy()
+        df_aux_events = df_analysis_events.copy()
+
+        user_ids = sorted(df_aux_users["user_id"].dropna().unique())
         selected_id = st.selectbox("Selecione o ID do participante", user_ids)
 
-        df_user = df[df["user_id"] == selected_id]
+        df_user = df_aux_events[df_aux_events["user_id"] == selected_id]
         if df_user.empty:
             st.warning("Participante não encontrado.")
         else:
