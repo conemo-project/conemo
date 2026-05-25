@@ -55,7 +55,7 @@ def _get_bq_client() -> bigquery.Client:
 
 def _query_main() -> str:
     return f"""
-    score_ranked AS (
+    WITH score_ranked AS (
       SELECT
         participant_id, instrument, score_total, score_timestamp,
         ROW_NUMBER() OVER (
