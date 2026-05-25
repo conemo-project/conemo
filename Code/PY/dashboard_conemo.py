@@ -169,6 +169,16 @@ def _query_formulario_web() -> str:
     """
 
 
+
+def _query_fw01() -> str:
+    """Alias canônico para validação/reauditoria: usa a mesma extração do Formulário Web."""
+    return _query_formulario_web()
+
+
+def _query_fw02() -> str:
+    """Alias canônico para validação/reauditoria: usa a mesma extração do Formulário Web."""
+    return _query_formulario_web()
+
 def _fetch(query: str) -> pd.DataFrame:
     return _get_bq_client().query(query).to_dataframe()
 
