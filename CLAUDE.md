@@ -17,9 +17,7 @@ The dashboard runs on `http://localhost:8501`. Streamlit config is in `.streamli
 
 ## Data modes
 
-**BigQuery (canonical source):** `load_data()` tries BigQuery first via `load_data_from_bigquery()`. Credentials come from `st.secrets["gcp_service_account"]` on Streamlit Cloud, or `GOOGLE_APPLICATION_CREDENTIALS` locally. The dashboard **never** falls back to the GCE metadata server — a missing credential raises a `RuntimeError` immediately.
-
-**Parquet (fallback):** If BigQuery fails, `load_data()` falls back to `Data/PARQUET/conemo_dados_consolidados_raw_04_03_2026.parquet`. This directory is **not tracked in git** and must be copied manually.
+**BigQuery (canonical source):** `load_data()` uses BigQuery. Credentials come from `st.secrets["gcp_service_account"]` on Streamlit Cloud. In local development, credentials must be provided via a secure ADC mechanism (no paths hard-coded in code or docs). Missing credentials raise a `RuntimeError` with a safe message.
 
 **Operational cutoff:** `DASHBOARD_CUTOFF_TS = "2026-01-28 00:00:00 UTC"` — all BigQuery queries filter `p.created_at >= TIMESTAMP(cutoff)`.
 
@@ -27,7 +25,7 @@ The dashboard runs on `http://localhost:8501`. Streamlit config is in `.streamli
 
 `Code/PY/dashboard_conemo.py` is a single-file Streamlit app (~1340 lines). Execution is top-to-bottom:
 
-1. **BigQuery client** — `_get_bq_client()`: tries `st.secrets` → `GOOGLE_APPLICATION_CREDENTIALS` → raises `RuntimeError`. Never uses ADC metadata server.
+1. **BigQuery client** — `_get_bq_client()`: tries `st.secrets` → ADC local seguro → raises `RuntimeError`.
 2. **Data loader (BigQuery)** — `load_data_from_bigquery()`: JOINs five curated views plus a `raw_perfil` CTE. Returns a flat DataFrame with one row per session event.
 3. **Data loader (Parquet legacy)** — inside `load_data()`: invokes `parse_user_legacy()` to unpack nested Firestore JSON from the old parquet schema.
 4. **Protocol classification** — `add_conemo_protocol_status(df)`: called on every code path, immediately before `df_all` is created. Classifies each row as `"Aderiu"` / `"Não Aderiu"` using `health_unit_key == 'UNK_UHS'` as the canonical criterion (text fallback when key is missing). Never removes rows.
@@ -51,7 +49,7 @@ The dashboard runs on `http://localhost:8501`. Streamlit config is in `.streamli
 | `cur_score_current_v1` | PHQ/GAD scores (saneada Fase D.2); `instrument` values: `PHQ`, `PHQ_JOURNEY`, `GAD`, `GAD_JOURNEY` |
 | `cur_journey_current_v1` | Journey enrollment |
 
-**Raw tables** (dataset `conemo-412202.firestore_export`): `users_raw_latest`, `sessions_raw_latest`, `journeys_raw_latest`, `patient_feedback_raw_latest`. The main query still pulls PII fields (`name`, `email`, `birthDate`) from `users_raw_latest` directly via a `raw_perfil` CTE, by professor decision.
+**Raw tables** (dataset `conemo-412202.firestore_export`): `users_raw_latest`, `sessions_raw_latest`, `journeys_raw_latest`, `patient_feedback_raw_latest`. A Beta deve evitar consumir PII diretamente em consultas amplas (ex.: `name`, `email`, `birthDate`) salvo deliberação explícita e domínio de acesso segregado.
 
 **Score deduplication rule:** `ROW_NUMBER() OVER (PARTITION BY participant_id, instrument ORDER BY score_timestamp DESC, source_document_id DESC)` — only `rn = 1` is used.
 

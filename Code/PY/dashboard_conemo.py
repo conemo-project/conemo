@@ -1,10 +1,10 @@
-import os
 from datetime import datetime
 
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
+import google.auth
 from google.cloud import bigquery
 from google.oauth2 import service_account
 
@@ -15,7 +15,6 @@ DASHBOARD_CUTOFF_TS = "2026-01-28 00:00:00 UTC"
 DASHBOARD_CUTOFF_SECONDS = int(pd.Timestamp(DASHBOARD_CUTOFF_TS).timestamp())
 _BQ_PROJECT = "conemo-412202"
 _BQ_SCOPES = ["https://www.googleapis.com/auth/cloud-platform"]
-_LOCAL_CREDS = "/home/aborba/Documentos/chave_conemo/conemo-412202-6e149ab3485a.json"
 
 
 # =============================================================================
@@ -23,13 +22,12 @@ _LOCAL_CREDS = "/home/aborba/Documentos/chave_conemo/conemo-412202-6e149ab3485a.
 # =============================================================================
 
 def _get_bq_client() -> bigquery.Client:
-    _has_secret = False
     try:
-        _has_secret = "gcp_service_account" in st.secrets
+        has_secret = "gcp_service_account" in st.secrets
     except Exception:
-        pass
+        has_secret = False
 
-    if _has_secret:
+    if has_secret:
         try:
             info = dict(st.secrets["gcp_service_account"])
             creds = service_account.Credentials.from_service_account_info(info, scopes=_BQ_SCOPES)
@@ -40,16 +38,15 @@ def _get_bq_client() -> bigquery.Client:
                 "Configure os Secrets em Manage app → Settings → Secrets."
             ) from exc
 
-    local_creds = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", _LOCAL_CREDS)
-    if local_creds and os.path.exists(local_creds):
-        creds = service_account.Credentials.from_service_account_file(local_creds, scopes=_BQ_SCOPES)
-        return bigquery.Client(credentials=creds, project=_BQ_PROJECT)
-
-    raise RuntimeError(
-        "Credenciais BigQuery indisponíveis. "
-        "No Streamlit Cloud: configure [gcp_service_account] nos Secrets. "
-        "Localmente: defina GOOGLE_APPLICATION_CREDENTIALS apontando para o arquivo de credenciais."
-    )
+    try:
+        creds, project_id = google.auth.default(scopes=_BQ_SCOPES)
+        return bigquery.Client(credentials=creds, project=project_id or _BQ_PROJECT)
+    except Exception as exc:
+        raise RuntimeError(
+            "Credenciais BigQuery indisponíveis. "
+            "No Streamlit Cloud: configure [gcp_service_account] nos Secrets. "
+            "No ambiente local: use credenciais de desenvolvimento seguras (ADC) antes de executar."
+        ) from exc
 
 
 # =============================================================================
@@ -58,17 +55,6 @@ def _get_bq_client() -> bigquery.Client:
 
 def _query_main() -> str:
     return f"""
-    WITH raw_perfil AS (
-      SELECT
-        document_id AS source_user_id,
-        JSON_EXTRACT_SCALAR(data, '$.name')         AS user_name,
-        JSON_EXTRACT_SCALAR(data, '$.email')        AS email,
-        JSON_EXTRACT_SCALAR(data, '$.birthDate._seconds') AS birth_seconds,
-        JSON_EXTRACT_SCALAR(data, '$.isTest')       AS is_test_raw,
-        JSON_EXTRACT_SCALAR(data, '$.isTestUser')   AS is_test_user_raw,
-        JSON_EXTRACT_SCALAR(data, '$.invalid')      AS is_invalid_raw
-      FROM `conemo-412202.firestore_export.users_raw_latest`
-    ),
     score_ranked AS (
       SELECT
         participant_id, instrument, score_total, score_timestamp,
@@ -95,9 +81,6 @@ def _query_main() -> str:
       u.ubs_name,
       u.ubs_city,
       p.gender,
-      r.user_name,
-      r.email,
-      CAST(r.birth_seconds AS INT64) AS birth_seconds,
       sl.phq_score,
       sl.gad_score,
       p.created_at,
@@ -108,13 +91,9 @@ def _query_main() -> str:
            ON p.participant_master_id = s.participant_master_id
     LEFT JOIN `conemo-412202.firestore_curated.cur_health_unit_v1` u
            ON p.health_unit_key = u.health_unit_key
-    LEFT JOIN raw_perfil r ON p.source_user_id = r.source_user_id
     LEFT JOIN score_latest sl ON p.participant_master_id = sl.participant_id
     WHERE p.created_at >= TIMESTAMP('{DASHBOARD_CUTOFF_TS}')
       AND (p.is_test_record IS NOT TRUE)
-      AND (r.is_test_raw IS NULL OR r.is_test_raw = 'false')
-      AND (r.is_test_user_raw IS NULL OR r.is_test_user_raw = 'false')
-      AND (r.is_invalid_raw IS NULL OR r.is_invalid_raw = 'false')
     """
 
 
@@ -163,7 +142,7 @@ def _query_formulario_web() -> str:
     ),
     journeys_enabled AS (
       SELECT
-        REGEXP_EXTRACT(document_name, r'/users/([^/]+)/') AS user_id,
+        REGEXP_EXTRACT(document_name, r'/' || 'users' || r'/([^/]+)/') AS user_id,
         COUNT(*) AS num_jornadas
       FROM `conemo-412202.firestore_export.journeys_raw_latest`
       WHERE COALESCE(SAFE_CAST(JSON_VALUE(DATA,'$.enabled') AS BOOL), FALSE) = TRUE
@@ -196,9 +175,8 @@ def _fetch(query: str) -> pd.DataFrame:
 
 def _load_main_raw() -> pd.DataFrame:
     df = _fetch(_query_main())
-    df["age"] = df["birth_seconds"].apply(_calculate_age)
     for col, default in [("ubs_name", "Não respondeu"), ("ubs_city", "Não respondeu"),
-                         ("user_name", "N/A"), ("email", "N/D"), ("gender", "N/A")]:
+                         ("gender", "N/A")]:
         df[col] = df[col].fillna(default)
     df["is_test"] = False
     df["is_test_user"] = False
@@ -212,8 +190,9 @@ def load_data() -> pd.DataFrame:
     try:
         df = _load_main_raw()
         st.session_state["last_update"] = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-    except Exception as e:
-        st.error(f"⚠️ Falha ao carregar dados do BigQuery. Erro: {e}")
+    except Exception:
+        st.error("⚠️ Falha ao carregar dados do BigQuery. Credenciais ausentes ou erro de consulta.")
+        st.caption("Modo Beta: execução segura sem detalhar credenciais, paths ou payloads.")
         return _add_protocol_status(pd.DataFrame())
 
     df["ubs_name"] = df["ubs_name"].str.upper().str.strip()
@@ -281,7 +260,7 @@ def _add_protocol_status(df: pd.DataFrame) -> pd.DataFrame:
 
     def _is_nao_aderiu(row: pd.Series) -> bool:
         key = _norm(row.get("health_unit_key", ""))
-        if key == "UNK_UHS":
+        if key in {"UNK_UHS", "NO_MATCH"}:
             return True
         if key in {"", "NONE", "NULL", "NAN"}:
             return (_norm(row.get("ubs_name", "")) == "NÃO RESPONDEU"
@@ -384,6 +363,18 @@ def _validate_runtime(df_all, df_main, df_nao, df_users):
 
 
 def _download(label, df, filename, key):
+    blocked_cols = {
+        "cpf", "email", "user_name", "name", "phone", "telefone", "address", "endereco",
+        "whatsapp", "risk_alert", "human_followup",
+        "user_id", "participant_id", "patient_id",
+        "birth_seconds", "birthdate", "json", "payload",
+    }
+    cols_lower = {c.lower() for c in df.columns}
+    if cols_lower & blocked_cols:
+        st.warning("Exportação bloqueada: CSV contém campos identificáveis/sensíveis (Beta).")
+        st.caption("Apenas exportações agregadas ou pseudonimizadas aprovadas são permitidas nesta fase.")
+        _download_disabled(f"{label} (bloqueado)", filename, f"{key}_blocked")
+        return
     st.download_button(label, df.to_csv(index=False).encode("utf-8"), filename, "text/csv", key=key)
 
 
@@ -505,6 +496,12 @@ def _ubs_tab_perfil(df_users: pd.DataFrame, dff: pd.DataFrame) -> None:
 
     st.divider()
     st.subheader("Distribuição por Faixa Etária")
+    if "age" not in df_users.columns:
+        st.info("Faixa etária indisponível nesta versão Beta (PII: data de nascimento não é consumida).")
+        _download_disabled("⬇️ CSV — Distribuição por Faixa Etária (indisponível)", "distribuicao_faixa_etaria.csv", "dl_ages_disabled")
+        st.caption("Mantém conformidade: não consumir `birthDate`/PII em consultas amplas.")
+        _ubs_exportacoes_pendentes()
+        return
     age_order = ["< 18", "18–29", "30–39", "40–49", "50–59", "60–69", "70–79", "80+", "Não informado"]
     age_data = (df_users["age"].apply(age_group).value_counts()
                 .reindex(age_order, fill_value=0).reset_index())
@@ -608,13 +605,34 @@ def _fw_metricas(df: pd.DataFrame) -> None:
 
 
 def _fw_tabela(df: pd.DataFrame) -> None:
+    dfv = df.copy()
+    dfv["patient_id_masked"] = dfv["patient_id"].astype(str).str.slice(0, 6) + "…"
     display = df.rename(columns={
         "data_cadastro": "Data", "patient_id": "ID do Paciente", "genero": "Gênero",
         "status_whatsapp": "Status WhatsApp", "completou_form_app": "Completou Form App",
         "jornadas": "Jornadas",
-    })[["Data", "ID do Paciente", "Gênero", "Status WhatsApp", "Completou Form App", "Jornadas"]]
+    })
+    display = dfv.rename(columns={
+        "data_cadastro": "Data",
+        "patient_id_masked": "ID do Paciente (mascarado)",
+        "genero": "Gênero",
+        "status_whatsapp": "Status WhatsApp",
+        "completou_form_app": "Completou Form App",
+        "jornadas": "Jornadas",
+    })[["Data", "ID do Paciente (mascarado)", "Gênero", "Status WhatsApp", "Completou Form App", "Jornadas"]]
     st.dataframe(display, use_container_width=True, hide_index=False)
     st.caption(f"{len(display)} paciente(s) exibido(s)")
+
+def _fw_export_resumo(df: pd.DataFrame) -> pd.DataFrame:
+    return (df.groupby(["genero", "status_whatsapp", "completou_form_app"])
+            .agg(Pacientes=("patient_id", "nunique"),
+                 Jornadas_media=("jornadas", "mean"))
+            .reset_index()
+            .rename(columns={
+                "genero": "Genero",
+                "status_whatsapp": "Status_WhatsApp",
+                "completou_form_app": "Completou_Form_App",
+            }))
 
 
 def render_formulario_web() -> None:
@@ -629,7 +647,9 @@ def render_formulario_web() -> None:
     st.markdown("---")
     _fw_tabela(df)
     st.markdown("---")
-    _download("⬇️ Exportar CSV", df, "formulario_web_jornadas.csv", "fw_download")
+    st.caption("Exportação na Beta: apenas resumo agregado (sem IDs por paciente).")
+    resumo = _fw_export_resumo(df)
+    _download("⬇️ Exportar CSV (agregado)", resumo, "formulario_web_resumo.csv", "fw_download_agg")
 
 
 # =============================================================================
@@ -643,13 +663,15 @@ def _gov_metricas(df_nao: pd.DataFrame, df_aderiu_users: pd.DataFrame) -> None:
     pct      = total_na / total * 100 if total > 0 else 0
     com_score = df_nao[df_nao["phq_score"].notna() | df_nao["gad_score"].notna()]["user_id"].nunique()
     unk_uhs   = df_nao[df_nao["health_unit_key"] == "UNK_UHS"]["user_id"].nunique()
+    no_match  = df_nao[df_nao["health_unit_key"] == "NO_MATCH"]["user_id"].nunique()
     c1, c2, c3 = st.columns(3)
     c1.metric("Total — Não Aderiu", total_na)
     c2.metric("% do Total Interno", f"{pct:.1f}%")
     c3.metric("Sem Score PHQ/GAD",  total_na - com_score)
-    c4, c5 = st.columns(2)
+    c4, c5, c6 = st.columns(3)
     c4.metric("Com algum Score PHQ/GAD",   com_score)
     c5.metric("health_unit_key = UNK_UHS", unk_uhs)
+    c6.metric("health_unit_key = NO_MATCH", no_match)
 
 
 def _gov_temporal(df: pd.DataFrame) -> None:
@@ -712,19 +734,11 @@ inclusão/entrada do CONEMO. São monitorados apenas para governança e qualidad
 
 def _aux_perfil(row: pd.Series) -> None:
     st.subheader("Perfil")
-    email_raw = str(row.get("email", "N/D"))
-    if "@" in email_raw:
-        local, domain = email_raw.split("@", 1)
-        email_masked = local[:3] + "***@" + domain
-    else:
-        email_masked = email_raw
-    age_str = f"{int(row['age'])} anos" if pd.notna(row.get("age")) else "N/D"
-    p1, p2, p3, p4, p5 = st.columns(5)
+    p1, p2, p3, p4 = st.columns(4)
     p1.metric("UBS",    row.get("ubs_name", "N/D"))
     p2.metric("Cidade", row.get("ubs_city", "N/D"))
     p3.metric("Gênero", normalize_gender(row.get("gender", "")))
-    p4.metric("Idade",  age_str)
-    p5.metric("E-mail", email_masked)
+    p4.metric("Participante", row.get("user_id", "N/D"))
 
 
 def _aux_scores(row: pd.Series) -> None:
@@ -792,22 +806,20 @@ def _aux_sessoes(df_user: pd.DataFrame, df_main: pd.DataFrame, selected_id: str)
     with st.expander("Ver tabela de sessões e exportar"):
         tbl = sessions[["Sessão", "Status", "completedDate"]].rename(columns={"completedDate": "Data de conclusão"})
         st.dataframe(tbl, width="stretch", hide_index=True)
-        st.caption("⚠️ Exportação clínico-operacional para uso interno autorizado. Dashboard NÃO OPERACIONAL.")
-        st.caption("Controle por perfil e log de exportações serão implementados antes da operacionalização.")
-        _download("⬇️ CSV — Sessões deste participante", tbl, f"sessoes_{selected_id}.csv", "dl_sessions")
+        st.warning("Exportação individual bloqueada na Beta (risco de dados clínicos individualizados).")
+        _download_disabled("⬇️ CSV — Sessões deste participante (bloqueado)", f"sessoes_{selected_id}.csv", "dl_sessions")
 
     with st.expander("📋 Resumo de sessões — todos os participantes aderentes (E.7-C.2)", expanded=False):
-        st.caption("Exportação parcial (sem dados de jornadas RAW). Dashboard NÃO OPERACIONAL.")
-        sp = (df_main.groupby("user_id")
-              .agg(UBS=("ubs_name", "first"), Cidade=("ubs_city", "first"),
+        st.caption("Resumo agregado por UBS (sem identificação individual).")
+        sp = (df_main.groupby(["ubs_city", "ubs_name"])
+              .agg(Participantes=("user_id", "nunique"),
                    Total_Sessoes=("sessionNumber", "nunique"),
                    Sessoes_Concluidas=("isCompleted", lambda x: int(x.sum())))
-              .reset_index().rename(columns={"user_id": "Participante"}))
+              .reset_index().rename(columns={"ubs_city": "Cidade", "ubs_name": "UBS"}))
         sp["Taxa_Conclusao_pct"] = (sp["Sessoes_Concluidas"] / sp["Total_Sessoes"] * 100).round(1)
         st.dataframe(sp, width="stretch", hide_index=True)
-        st.caption("⚠️ Exportação clínico-operacional para uso interno autorizado. Finalidade assistencial/operacional CONEMO.")
-        st.caption("Controle por perfil e log de exportações serão implementados antes da operacionalização.")
-        _download("⬇️ CSV — Sessões por Participante (parcial)", sp, "sessoes_por_paciente.csv", "dl_sessoes")
+        st.caption("⚠️ Exportação agregada para uso interno autorizado. Dashboard NÃO OPERACIONAL.")
+        _download("⬇️ CSV — Sessões por UBS (agregado)", sp, "sessoes_por_ubs.csv", "dl_sessoes_ubs")
 
 
 def render_consulta_auxiliar(df_users: pd.DataFrame, df_events: pd.DataFrame, df_main: pd.DataFrame) -> None:
