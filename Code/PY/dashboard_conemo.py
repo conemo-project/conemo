@@ -116,11 +116,27 @@ def _query_historico(participant_id: str) -> str:
     """
 
 
-def _query_formulario_web() -> str:
+def _query_fw01() -> str:
+    """
+    SQL fiel à estrutura do bigquery_01.odt (Looker Studio):
+      cte_users_base  ↔  ds.users  inner base CTE  (sem campos baseline)
+      cte_users       ↔  ds.users  outer SELECT
+      cte_jornadas    ↔  ds.enabled-journeys-grouped-by-user
+    Retorna TODOS os pacientes com jornadas habilitadas (Sim e Não no form).
+    """
     return f"""
-    WITH users AS (
+    WITH cte_users_base AS (
+      -- ds.users — base: extração JSON bruta (bigquery_01, sem baseline)
       SELECT
-        document_id AS patient_id,
+        document_id,
+        TRIM(UPPER(JSON_VALUE(DATA, '$.gender')))          AS gender_raw,
+        JSON_EXTRACT(DATA, '$.organization')               AS organization,
+        JSON_EXTRACT(DATA, '$.source')                     AS source,
+        JSON_EXTRACT(DATA, '$.whatsapp')                   AS whatsapp_info,
+        JSON_QUERY(DATA,  '$.forms')                       AS forms_json,
+        COALESCE(SAFE_CAST(JSON_VALUE(DATA, '$.isTestUser') AS BOOL), FALSE) AS is_test_user,
+        COALESCE(SAFE_CAST(JSON_VALUE(DATA, '$.isTest')     AS BOOL), FALSE) AS is_test,
+        JSON_VALUE(DATA, '$.invalid')                      AS is_invalid_raw,
         TIMESTAMP_MICROS(
           COALESCE(
             SAFE_CAST(JSON_VALUE(DATA, '$.createdAt._seconds') AS INT64),
@@ -131,53 +147,169 @@ def _query_formulario_web() -> str:
             SAFE_CAST(JSON_VALUE(DATA, '$.createdAt.nanos')        AS INT64),
             0
           ), 1000)
-        ) AS created_at_ts,
-        TRIM(UPPER(JSON_VALUE(DATA, '$.gender')))                 AS gender_raw,
-        JSON_VALUE(DATA, '$.whatsapp.authorizedNotifications')    AS whatsapp_authorized,
-        JSON_QUERY(DATA, '$.lastBaselineDate')                    AS last_baseline_date,
-        COALESCE(SAFE_CAST(JSON_VALUE(DATA,'$.isTestUser') AS BOOL), FALSE) AS is_test_user,
-        COALESCE(SAFE_CAST(JSON_VALUE(DATA,'$.isTest')     AS BOOL), FALSE) AS is_test,
-        JSON_VALUE(DATA, '$.invalid')                             AS is_invalid_raw
+        ) AS created_at_ts
       FROM `conemo-412202.firestore_export.users_raw_latest`
     ),
-    journeys_enabled AS (
+    cte_users AS (
+      -- ds.users — outer SELECT: campos derivados bigquery_01
+      SELECT
+        document_id                                                   AS user_id,
+        DATE(created_at_ts)                                           AS data_cadastro,
+        gender_raw,
+        JSON_VALUE(organization,  '$.name')                           AS org_name,
+        JSON_VALUE(organization,  '$.validate')                       AS org_validate,
+        JSON_VALUE(source,        '$.name')                           AS source_name,
+        JSON_VALUE(whatsapp_info, '$.authorizedNotifications')        AS whatsapp_authorized,
+        JSON_VALUE(whatsapp_info, '$.whatsappId')                     AS whatsapp_id,
+        JSON_VALUE(whatsapp_info, '$.lastConfirmationResponseAt')     AS whatsapp_last_confirm,
+        JSON_VALUE(forms_json,    '$[0].status')                      AS first_form_status
+      FROM cte_users_base
+      WHERE created_at_ts >= TIMESTAMP('{DASHBOARD_CUTOFF_TS}')
+        AND is_test_user IS FALSE
+        AND is_test      IS FALSE
+        AND (is_invalid_raw IS NULL OR is_invalid_raw = 'false')
+    ),
+    cte_jornadas AS (
+      -- ds.enabled-journeys-grouped-by-user (idêntico em bigquery_01 e bigquery_02)
       SELECT
         REGEXP_EXTRACT(document_name, r'/' || 'users' || r'/([^/]+)/') AS user_id,
-        COUNT(*) AS num_jornadas
+        LOGICAL_OR(
+          COALESCE(SAFE_CAST(JSON_VALUE(DATA, '$.isCompleted') AS BOOL), FALSE)
+        )                                                             AS has_completed_journey,
+        COUNT(*)                                                      AS num_jornadas
       FROM `conemo-412202.firestore_export.journeys_raw_latest`
-      WHERE COALESCE(SAFE_CAST(JSON_VALUE(DATA,'$.enabled') AS BOOL), FALSE) = TRUE
+      WHERE COALESCE(SAFE_CAST(JSON_VALUE(DATA, '$.enabled') AS BOOL), FALSE) IS TRUE
       GROUP BY user_id
     )
     SELECT
-      u.patient_id,
-      DATE(u.created_at_ts) AS data_cadastro,
+      u.user_id                                                         AS patient_id,
+      u.data_cadastro,
       CASE
         WHEN u.gender_raw IN ('F','FEMININO','FEMALE') THEN 'F'
         WHEN u.gender_raw IN ('M','MASCULINO','MALE')  THEN 'M'
         ELSE 'N/I'
-      END AS genero,
-      CASE WHEN u.whatsapp_authorized = 'true' THEN 'Habilitado' ELSE 'Desabilitado' END AS status_whatsapp,
-      CASE WHEN u.last_baseline_date IS NOT NULL THEN 'Sim' ELSE 'Não' END AS completou_form_app,
-      j.num_jornadas AS jornadas
-    FROM users u
-    INNER JOIN journeys_enabled j ON j.user_id = u.patient_id
-    WHERE u.created_at_ts >= TIMESTAMP('{DASHBOARD_CUTOFF_TS}')
-      AND u.is_test_user IS FALSE
-      AND u.is_test     IS FALSE
-      AND (u.is_invalid_raw IS NULL OR u.is_invalid_raw = 'false')
-    ORDER BY u.created_at_ts ASC
+      END                                                               AS genero,
+      CASE WHEN u.whatsapp_authorized = 'true'
+           THEN 'Habilitado' ELSE 'Desabilitado'
+      END                                                               AS status_whatsapp,
+      CASE WHEN u.first_form_status IS NOT NULL AND u.first_form_status != ''
+           THEN 'Sim' ELSE 'Não'
+      END                                                               AS completou_form_app,
+      j.num_jornadas                                                    AS jornadas,
+      u.org_name,
+      u.org_validate,
+      u.source_name,
+      u.whatsapp_id,
+      u.whatsapp_last_confirm
+    FROM cte_users u
+    INNER JOIN cte_jornadas j ON j.user_id = u.user_id
+    ORDER BY u.data_cadastro ASC
     """
 
 
-
-def _query_fw01() -> str:
-    """Alias canônico para validação/reauditoria: usa a mesma extração do Formulário Web."""
-    return _query_formulario_web()
-
-
 def _query_fw02() -> str:
-    """Alias canônico para validação/reauditoria: usa a mesma extração do Formulário Web."""
-    return _query_formulario_web()
+    """
+    SQL fiel à estrutura do bigquery_02.odt (Looker Studio):
+      cte_users_base  ↔  ds.users  inner base CTE
+      cte_users       ↔  ds.users  outer SELECT (campos derivados)
+      cte_jornadas    ↔  ds.enabled-journeys-grouped-by-user
+    """
+    return f"""
+    WITH cte_users_base AS (
+      -- ds.users — base: extração de campos JSON brutos (bigquery_02)
+      SELECT
+        document_id,
+        TRIM(UPPER(JSON_VALUE(DATA, '$.gender')))          AS gender_raw,
+        JSON_EXTRACT(DATA, '$.organization')               AS organization,
+        JSON_EXTRACT(DATA, '$.source')                     AS source,
+        JSON_EXTRACT(DATA, '$.whatsapp')                   AS whatsapp_info,
+        JSON_QUERY(DATA,  '$.forms')                       AS forms_json,
+        JSON_QUERY(DATA,  '$.baseline')                    AS baseline,
+        COALESCE(SAFE_CAST(JSON_VALUE(DATA, '$.isTestUser') AS BOOL), FALSE) AS is_test_user,
+        COALESCE(SAFE_CAST(JSON_VALUE(DATA, '$.isTest')     AS BOOL), FALSE) AS is_test,
+        JSON_VALUE(DATA, '$.invalid')                      AS is_invalid_raw,
+        TIMESTAMP_MICROS(
+          COALESCE(
+            SAFE_CAST(JSON_VALUE(DATA, '$.createdAt._seconds') AS INT64),
+            SAFE_CAST(JSON_VALUE(DATA, '$.createdAt.seconds')  AS INT64)
+          ) * 1000000
+          + DIV(COALESCE(
+            SAFE_CAST(JSON_VALUE(DATA, '$.createdAt._nanoseconds') AS INT64),
+            SAFE_CAST(JSON_VALUE(DATA, '$.createdAt.nanos')        AS INT64),
+            0
+          ), 1000)
+        ) AS created_at_ts
+      FROM `conemo-412202.firestore_export.users_raw_latest`
+    ),
+    cte_users AS (
+      -- ds.users — outer SELECT: campos derivados de bigquery_02
+      SELECT
+        document_id                                                   AS user_id,
+        DATE(created_at_ts)                                           AS data_cadastro,
+        gender_raw,
+        JSON_VALUE(organization,  '$.name')                           AS org_name,
+        JSON_VALUE(organization,  '$.validate')                       AS org_validate,
+        JSON_VALUE(source,        '$.name')                           AS source_name,
+        JSON_VALUE(whatsapp_info, '$.authorizedNotifications')        AS whatsapp_authorized,
+        JSON_VALUE(whatsapp_info, '$.whatsappId')                     AS whatsapp_id,
+        JSON_VALUE(whatsapp_info, '$.lastConfirmationResponseAt')     AS whatsapp_last_confirm,
+        JSON_VALUE(forms_json,    '$[0].status')                      AS first_form_status,
+        -- bigquery_02: sub-queries correlacionadas de baseline
+        (SELECT JSON_VALUE(a, '$.value')
+         FROM UNNEST(JSON_QUERY_ARRAY(baseline, '$[0].answers')) AS a
+         WHERE JSON_VALUE(a, '$.variable') = 'ms4'      LIMIT 1)     AS baseline_ms4,
+        (SELECT JSON_VALUE(a, '$.value')
+         FROM UNNEST(JSON_QUERY_ARRAY(baseline, '$[0].answers')) AS a
+         WHERE JSON_VALUE(a, '$.variable') = 'psychtr'  LIMIT 1)     AS baseline_psychtr,
+        (SELECT JSON_VALUE(a, '$.value')
+         FROM UNNEST(JSON_QUERY_ARRAY(baseline, '$[0].answers')) AS a
+         WHERE JSON_VALUE(a, '$.variable') = 'psychhosp' LIMIT 1)    AS baseline_psychhosp
+      FROM cte_users_base
+      WHERE created_at_ts >= TIMESTAMP('{DASHBOARD_CUTOFF_TS}')
+        AND is_test_user IS FALSE
+        AND is_test      IS FALSE
+        AND (is_invalid_raw IS NULL OR is_invalid_raw = 'false')
+    ),
+    cte_jornadas AS (
+      -- ds.enabled-journeys-grouped-by-user (bigquery_02)
+      SELECT
+        REGEXP_EXTRACT(document_name, r'/' || 'users' || r'/([^/]+)/') AS user_id,
+        LOGICAL_OR(
+          COALESCE(SAFE_CAST(JSON_VALUE(DATA, '$.isCompleted') AS BOOL), FALSE)
+        )                                                             AS has_completed_journey,
+        COUNT(*)                                                      AS num_jornadas
+      FROM `conemo-412202.firestore_export.journeys_raw_latest`
+      WHERE COALESCE(SAFE_CAST(JSON_VALUE(DATA, '$.enabled') AS BOOL), FALSE) IS TRUE
+      GROUP BY user_id
+    )
+    SELECT
+      u.user_id                                                         AS patient_id,
+      u.data_cadastro,
+      CASE
+        WHEN u.gender_raw IN ('F','FEMININO','FEMALE') THEN 'F'
+        WHEN u.gender_raw IN ('M','MASCULINO','MALE')  THEN 'M'
+        ELSE 'N/I'
+      END                                                               AS genero,
+      CASE WHEN u.whatsapp_authorized = 'true'
+           THEN 'Habilitado' ELSE 'Desabilitado'
+      END                                                               AS status_whatsapp,
+      CASE WHEN u.first_form_status IS NOT NULL AND u.first_form_status != ''
+           THEN 'Sim' ELSE 'Não'
+      END                                                               AS completou_form_app,
+      j.num_jornadas                                                    AS jornadas,
+      u.org_name,
+      u.org_validate,
+      u.source_name,
+      u.whatsapp_id,
+      u.whatsapp_last_confirm,
+      u.baseline_ms4,
+      u.baseline_psychtr,
+      u.baseline_psychhosp
+    FROM cte_users u
+    INNER JOIN cte_jornadas j ON j.user_id = u.user_id
+    ORDER BY u.data_cadastro ASC
+    """
+
 
 def _fetch(query: str) -> pd.DataFrame:
     return _get_bq_client().query(query).to_dataframe()
@@ -223,9 +355,17 @@ def load_history(participant_id: str) -> pd.DataFrame:
 
 
 @st.cache_data(ttl=900)
-def load_formulario_web() -> pd.DataFrame:
+def load_fw01() -> pd.DataFrame:
     try:
-        return _fetch(_query_formulario_web())
+        return _fetch(_query_fw01())
+    except Exception:
+        return pd.DataFrame()
+
+
+@st.cache_data(ttl=900)
+def load_fw02() -> pd.DataFrame:
+    try:
+        return _fetch(_query_fw02())
     except Exception:
         return pd.DataFrame()
 
@@ -586,52 +726,81 @@ def render_estatisticas_ubs(df_all, df_main, df_nao, df_users) -> None:
 
 
 # =============================================================================
-# PÁGINA: FORMULÁRIO WEB
+# PÁGINA: FORMULÁRIO WEB — módulo fw01 (bigquery_01)
 # =============================================================================
 
-def _fw_filtros(df: pd.DataFrame) -> pd.DataFrame:
-    st.sidebar.markdown("---")
-    st.sidebar.markdown("**Filtros — Formulário Web**")
+def _fw_filtros_inline(df: pd.DataFrame, prefix: str) -> pd.DataFrame:
+    """Filtros inline (3 colunas) reutilizáveis por fw01 e fw02."""
+    col_g, col_w, col_f = st.columns(3)
     generos = ["Todos"] + sorted(df["genero"].dropna().unique().tolist())
-    sel_g = st.sidebar.selectbox("Gênero", generos, key="fw_genero")
-    sel_w = st.sidebar.selectbox("Status WhatsApp", ["Todos", "Habilitado", "Desabilitado"], key="fw_whatsapp")
-    sel_f = st.sidebar.selectbox("Completou Form App", ["Todos", "Sim", "Não"], key="fw_form")
+    sel_g = col_g.selectbox("Gênero",             generos,                               key=f"{prefix}_genero")
+    sel_w = col_w.selectbox("Status WhatsApp",    ["Todos", "Habilitado", "Desabilitado"], key=f"{prefix}_whatsapp")
+    sel_f = col_f.selectbox("Completou Form App", ["Todos", "Sim", "Não"],               key=f"{prefix}_form")
     mask = pd.Series(True, index=df.index)
-    if sel_g != "Todos": mask &= df["genero"] == sel_g
-    if sel_w != "Todos": mask &= df["status_whatsapp"] == sel_w
+    if sel_g != "Todos": mask &= df["genero"]            == sel_g
+    if sel_w != "Todos": mask &= df["status_whatsapp"]   == sel_w
     if sel_f != "Todos": mask &= df["completou_form_app"] == sel_f
     return df[mask].copy()
 
 
 def _fw_metricas(df: pd.DataFrame) -> None:
+    """Métricas resumidas — reutilizável por fw01 e fw02."""
     total = len(df)
-    w_hab = (df["status_whatsapp"] == "Habilitado").sum()
+    w_hab = (df["status_whatsapp"]    == "Habilitado").sum()
     f_ok  = (df["completou_form_app"] == "Sim").sum()
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Total de pacientes", total)
-    c2.metric("WhatsApp habilitado",  w_hab, f"{w_hab/total*100:.0f}%" if total else "—")
-    c3.metric("Completaram Form App", f_ok,  f"{f_ok/total*100:.0f}%"  if total else "—")
+    c1.metric("Total de pacientes",        total)
+    c2.metric("WhatsApp habilitado",       w_hab, f"{w_hab/total*100:.0f}%" if total else "—")
+    c3.metric("Completaram Form App",      f_ok,  f"{f_ok/total*100:.0f}%"  if total else "—")
     c4.metric("Jornadas (média/paciente)", f"{df['jornadas'].mean():.1f}" if total else "—")
 
 
-def _fw_tabela(df: pd.DataFrame) -> None:
+def _fw_tabela_principal(df: pd.DataFrame) -> None:
+    """Tabela principal 6 colunas — comum às duas abas do Formulário Web."""
     dfv = df.copy()
     dfv["patient_id_masked"] = dfv["patient_id"].astype(str).str.slice(0, 6) + "…"
-    display = df.rename(columns={
-        "data_cadastro": "Data", "patient_id": "ID do Paciente", "genero": "Gênero",
-        "status_whatsapp": "Status WhatsApp", "completou_form_app": "Completou Form App",
-        "jornadas": "Jornadas",
-    })
-    display = dfv.rename(columns={
-        "data_cadastro": "Data",
-        "patient_id_masked": "ID do Paciente (mascarado)",
-        "genero": "Gênero",
-        "status_whatsapp": "Status WhatsApp",
+    cols = {
+        "data_cadastro":      "Data",
+        "patient_id_masked":  "ID do Paciente (mascarado)",
+        "genero":             "Gênero",
+        "status_whatsapp":    "Status WhatsApp",
         "completou_form_app": "Completou Form App",
-        "jornadas": "Jornadas",
-    })[["Data", "ID do Paciente (mascarado)", "Gênero", "Status WhatsApp", "Completou Form App", "Jornadas"]]
-    st.dataframe(display, use_container_width=True, hide_index=False)
-    st.caption(f"{len(display)} paciente(s) exibido(s)")
+        "jornadas":           "Jornadas",
+    }
+    st.dataframe(
+        dfv.rename(columns=cols)[list(cols.values())],
+        use_container_width=True,
+        hide_index=False,
+    )
+    st.caption(f"{len(df)} paciente(s) exibido(s)")
+
+
+def render_fw01(df_raw: pd.DataFrame) -> None:
+    """Renderiza aba 01 — todos os pacientes com jornadas habilitadas."""
+    df = _fw_filtros_inline(df_raw, "fw01")
+    _fw_metricas(df)
+    st.markdown("---")
+    _fw_tabela_principal(df)
+    st.markdown("---")
+    st.caption("Exportação na Beta: apenas resumo agregado (sem IDs por paciente).")
+    resumo = _fw_export_resumo(df)
+    _download("⬇️ Exportar CSV (agregado)", resumo, "fw01_resumo.csv", "fw01_download_agg")
+
+
+# =============================================================================
+# PÁGINA: FORMULÁRIO WEB — módulo fw02 (bigquery_02)
+# =============================================================================
+
+def render_fw02(df_raw: pd.DataFrame) -> None:
+    """Renderiza aba 02 — pacientes que completaram o form app."""
+    df = _fw_filtros_inline(df_raw, "fw02")
+    _fw_metricas(df)
+    st.markdown("---")
+    _fw_tabela_principal(df)
+    st.markdown("---")
+    st.caption("Exportação na Beta: apenas resumo agregado (sem IDs por paciente).")
+    resumo = _fw_export_resumo(df)
+    _download("⬇️ Exportar CSV (agregado)", resumo, "fw02_resumo.csv", "fw02_download_agg")
 
 def _fw_export_resumo(df: pd.DataFrame) -> pd.DataFrame:
     return (df.groupby(["genero", "status_whatsapp", "completou_form_app"])
@@ -646,20 +815,28 @@ def _fw_export_resumo(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def render_formulario_web() -> None:
-    st.title("📋 Formulário Web — Pacientes com Jornadas Habilitadas")
-    with st.spinner("Carregando dados do BigQuery..."):
-        df_raw = load_formulario_web()
-    if df_raw.empty:
-        st.warning("Nenhum dado disponível. Verifique a conexão com o BigQuery.")
-        return
-    df = _fw_filtros(df_raw)
-    _fw_metricas(df)
-    st.markdown("---")
-    _fw_tabela(df)
-    st.markdown("---")
-    st.caption("Exportação na Beta: apenas resumo agregado (sem IDs por paciente).")
-    resumo = _fw_export_resumo(df)
-    _download("⬇️ Exportar CSV (agregado)", resumo, "formulario_web_resumo.csv", "fw_download_agg")
+    """Página Formulário Web — duas abas: fw01 (bigquery_01) e fw02 (bigquery_02)."""
+    st.title("📋 Formulário Web")
+    tab1, tab2 = st.tabs([
+        "📊 Todos com Jornadas",
+        "✅ Completaram Form App",
+    ])
+    with tab1:
+        st.subheader("Pacientes com Jornadas Habilitadas")
+        with st.spinner("Carregando dados do BigQuery..."):
+            df1 = load_fw01()
+        if df1.empty:
+            st.warning("Nenhum dado disponível. Verifique a conexão com o BigQuery.")
+        else:
+            render_fw01(df1)
+    with tab2:
+        st.subheader("Pacientes com Jornadas Habilitadas que Completaram o Form no App")
+        with st.spinner("Carregando dados do BigQuery..."):
+            df2 = load_fw02()
+        if df2.empty:
+            st.warning("Nenhum dado disponível. Verifique a conexão com o BigQuery.")
+        else:
+            render_fw02(df2)
 
 
 # =============================================================================
