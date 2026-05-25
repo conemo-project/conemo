@@ -37,6 +37,7 @@ tmp_*/
 # ---------------------------------------------------------------------------
 .env
 .env.*
+.streamlit/secrets.toml
 *.pem
 *.key
 *.p12
@@ -101,6 +102,8 @@ packrat/
 *.swp
 *.swo
 *~
+**/.~lock*
+*.odt#
 .DS_Store
 Thumbs.db
 desktop.ini

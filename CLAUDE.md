@@ -4,58 +4,73 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project overview
 
-CONEMO is a Streamlit dashboard that monitors a mental health intervention study. It tracks participants enrolled at UBS (primary care units), their session progress across therapeutic journeys (depression/PHQ-9, anxiety/GAD-7), clinical scores, and patient feedback. Data comes from Google BigQuery (Firestore export) or a local PARQUET cache.
+CONEMO is a Streamlit dashboard that monitors a mental health intervention study. It tracks participants enrolled at UBS (primary care units), their session progress across therapeutic journeys (depression/PHQ-9, anxiety/GAD-7), clinical scores, and patient feedback. Data comes from Google BigQuery (curated views) or a local PARQUET fallback.
 
 ## Running the dashboard
 
 ```bash
-# Install dependencies
 pip install -r requirements.txt
-
-# Run the dashboard
 streamlit run Code/PY/dashboard_conemo.py
-
-# Or the dated version (Fase C1 deliverable, currently staged):
-streamlit run Code/PY/dashboard_conemo_20_04_2026_v1.py
 ```
 
-The dashboard runs on `http://localhost:8501` by default. Streamlit config is in `.streamlit/config.toml`.
+The dashboard runs on `http://localhost:8501`. Streamlit config is in `.streamlit/config.toml`.
 
 ## Data modes
 
-**Local cache mode (default for development):** The dashboard reads from `Data/PARQUET/` files. This directory is **not tracked in git** — it must be copied manually to the local clone before running.
+**BigQuery (canonical source):** `load_data()` uses BigQuery. Credentials come from `st.secrets["gcp_service_account"]` on Streamlit Cloud. In local development, credentials must be provided via a secure ADC mechanism (no paths hard-coded in code or docs). Missing credentials raise a `RuntimeError` with a safe message.
 
-**BigQuery mode:** Activated when Google credentials are available. On Streamlit Cloud, credentials come from `st.secrets["gcp_service_account"]`. Locally, the fallback path is `/home/aborba/Documentos/chave_conemo/conemo-412202-6e149ab3485a.json`. The `🔄` button in the sidebar clears Streamlit's `@st.cache_data` and re-queries BigQuery.
+**Operational cutoff:** `DASHBOARD_CUTOFF_TS = "2026-01-28 00:00:00 UTC"` — all BigQuery queries filter `p.created_at >= TIMESTAMP(cutoff)`.
 
 ## Code architecture
 
-The dashboard is a single-file Streamlit app. Its structure:
+`Code/PY/dashboard_conemo.py` is a single-file Streamlit app (~1340 lines). Execution is top-to-bottom:
 
-1. **BigQuery client** — `_get_bq_client()` with `@st.cache_resource`; tries `st.secrets` first, falls back to local key file.
-2. **Data loaders** — `load_users_sessions()`, `load_journeys()`, `load_patience()` with `@st.cache_data`. Each runs a SQL query against `conemo-412202.firestore_export.*_raw_latest` tables.
-3. **Data enrichment** — `parse_user()` inside `load_users_sessions()` unpacks nested JSON from Firestore into flat columns (`ubs_name`, `ubs_city`, `phq_score`, `gad_score`, age, etc.). `build_desc_df()` does the same for baseline questionnaire variables.
-4. **Sidebar navigation** — `st.sidebar.radio` drives page selection; six pages rendered with `if/elif` blocks.
-5. **Clinical helpers** — `phq_severity()`, `gad_severity()`, `age_group()`, `_phq_gravity()`, `_igi_gravity()` translate raw scores to clinical labels.
-6. **Display helpers** — `_freq_table()` and `_stats_table()` render paired table+chart columns for the Análise Descritiva page.
+1. **BigQuery client** — `_get_bq_client()`: tries `st.secrets` → ADC local seguro → raises `RuntimeError`.
+2. **Data loader (BigQuery)** — `load_data_from_bigquery()`: JOINs five curated views plus a `raw_perfil` CTE. Returns a flat DataFrame with one row per session event.
+3. **Data loader (Parquet legacy)** — inside `load_data()`: invokes `parse_user_legacy()` to unpack nested Firestore JSON from the old parquet schema.
+4. **Protocol classification** — `add_conemo_protocol_status(df)`: called on every code path, immediately before `df_all` is created. Classifies each row as `"Aderiu"` / `"Não Aderiu"` using `health_unit_key == 'UNK_UHS'` as the canonical criterion (text fallback when key is missing). Never removes rows.
+5. **Global DataFrames** — `df_all` (full), `df_main` (Aderiu only), `df_nao_aderiu`, `df_main_users` (deduplicated by `user_id`).
+6. **Sidebar** — timestamp display, `🔄` button (`st.cache_data.clear()` + `st.rerun()`), and `st.sidebar.radio` page selector.
+7. **Pages (if/elif blocks)**:
+   - `📊 Estatísticas por UBS` — main analytics, UBS-first view
+   - `🔍 Governança — Não Aderiu` — governance page for protocol non-adherents
+   - `👤 Consulta auxiliar` — individual participant lookup with longitudinal PHQ/GAD history via `load_history_from_bigquery()`
+8. **Clinical helpers** — `phq_severity()`, `gad_severity()`, `age_group()`, `normalize_gender()` translate raw scores/values to clinical labels.
 
-Key data invariant: `ubs_city` is normalized to Title Case and `ubs_name` stays uppercase (both filtered to remove invalid entries like `"N/A"`, `""`, `"FAKE ORGANIZATION"`).
+## BigQuery schema
 
-## BigQuery schema (Firestore export)
+**Curated views** (dataset `conemo-412202.firestore_curated`):
 
-| Table | Key fields used |
+| View | Purpose |
 |---|---|
-| `users_raw_latest` | `document_id` (user_id), `DATA` (JSON with org, forms, baseline, scores) |
-| `sessions_raw_latest` | `DATA` (JSON), `path_params.userId` |
-| `journeys_raw_latest` | `DATA` (JSON), `path_params.userId`, `enabled='true'` filter |
-| `patient_feedback_raw_latest` | `DATA` (JSON with patientId, feedbackType, source) |
+| `cur_participant_current_v1` | One row per participant; key: `participant_master_id`. PII-free. `health_unit_key = 'UNK_UHS'` means no UBS assigned. |
+| `cur_session_current_v1` | Session events; joins on `participant_master_id` |
+| `cur_health_unit_v1` | UBS dimension; joins on `health_unit_key` |
+| `cur_score_current_v1` | PHQ/GAD scores (saneada Fase D.2); `instrument` values: `PHQ`, `PHQ_JOURNEY`, `GAD`, `GAD_JOURNEY` |
+| `cur_journey_current_v1` | Journey enrollment |
+
+**Raw tables** (dataset `conemo-412202.firestore_export`): `users_raw_latest`, `sessions_raw_latest`, `journeys_raw_latest`, `patient_feedback_raw_latest`. A Beta deve evitar consumir PII diretamente em consultas amplas (ex.: `name`, `email`, `birthDate`) salvo deliberação explícita e domínio de acesso segregado.
+
+**Score deduplication rule:** `ROW_NUMBER() OVER (PARTITION BY participant_id, instrument ORDER BY score_timestamp DESC, source_document_id DESC)` — only `rn = 1` is used.
+
+**Test record exclusion:** three independent guards — `p.is_test_record IS NOT TRUE` (curated), `r.is_test_raw = 'false'` (raw `$.isTest`), `r.is_test_user_raw = 'false'` (raw `$.isTestUser`). `NULL` values in raw flags are treated as non-test (safe inclusion).
+
+## SQL layer (`sql/`)
+
+Nine `.sql` files define the curated views and marts. Prefix convention: `fase2_cur_*` = curated shared views; `fase3_mart_*` = analytical marts. These are deployed manually to BigQuery — there is no migration runner.
+
+## Key data invariants
+
+- `ubs_city` → Title Case; `ubs_name` → UPPERCASE; both filled with `"Não respondeu"` when NULL.
+- `conemo_protocol_status` must be present on every DataFrame before any page renders — `validate_runtime_contract()` checks this.
+- The `🔄` button must remain visible per a binding coordination decision (Fase B, 2026-04-06).
 
 ## Workflow and governance
 
-This project follows a formal phase-based workflow. **New phases require explicit approval from the project coordinator before any implementation.** The canonical documents are in `Docs/`:
+**New phases require explicit approval from the project coordinator before implementation.** All technical work must be on a feature branch; direct commits to `main` are prohibited.
 
-- `Docs/Plano-implementacao-dashboard.md` — canonical implementation plan (V.2.0.0)
-- `Docs/fase-dashboard-executiva-1.md` — execution log for Fase C1 (completed, merged via PR #1)
+Canonical documents:
+- `Docs/Plano-implementacao-dashboard.md` — implementation plan V.2.0.0 (canonical reference)
+- `Docs/fase-e-handoff-final.md` — current phase handoff
 
-Branches are required for all technical work; direct commits to `main` are not allowed by discipline. The `🔄` button must remain visible in the dashboard per a binding coordination decision.
-
-Current state: Fase C1 (P0/P1/P2) is merged into `main`. Next phase awaits formal prioritization.
+Current state: Fase D.3 (PHQ/GAD reintegration) is merged into `main`. Fase D.4 (longitudinal history per participant) is partially implemented in `load_history_from_bigquery()`.
