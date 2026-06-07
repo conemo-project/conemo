@@ -1,4 +1,3 @@
-import os
 from datetime import datetime
 
 import pandas as pd
@@ -16,12 +15,6 @@ DASHBOARD_CUTOFF_TS = "2026-01-28 00:00:00 UTC"
 DASHBOARD_CUTOFF_SECONDS = int(pd.Timestamp(DASHBOARD_CUTOFF_TS).timestamp())
 _BQ_PROJECT = "conemo-412202"
 _BQ_SCOPES = ["https://www.googleapis.com/auth/cloud-platform"]
-
-# Caminhos locais de chave de serviço, por máquina de desenvolvimento.
-# O código usa o primeiro arquivo que existir; adicione novos caminhos conforme necessário.
-_LOCAL_DEV_KEY_PATHS = [
-    "/home/aborba/Documentos/chave_conemo/conemo-412202-6e149ab3485a.json",
-]
 
 
 # =============================================================================
@@ -45,12 +38,6 @@ def _get_bq_client() -> bigquery.Client:
                 "Configure os Secrets em Manage app → Settings → Secrets."
             ) from exc
 
-    # Desenvolvimento local: usa o primeiro arquivo de chave existente na lista
-    for key_path in _LOCAL_DEV_KEY_PATHS:
-        if os.path.isfile(key_path):
-            os.environ.setdefault("GOOGLE_APPLICATION_CREDENTIALS", key_path)
-            break
-
     try:
         creds, project_id = google.auth.default(scopes=_BQ_SCOPES)
         return bigquery.Client(credentials=creds, project=project_id or _BQ_PROJECT)
@@ -58,7 +45,7 @@ def _get_bq_client() -> bigquery.Client:
         raise RuntimeError(
             "Credenciais BigQuery indisponíveis. "
             "No Streamlit Cloud: configure [gcp_service_account] nos Secrets. "
-            "No ambiente local: verifique se o arquivo de chave existe ou configure ADC."
+            "No ambiente local: use credenciais de desenvolvimento seguras (ADC) antes de executar."
         ) from exc
 
 
@@ -324,60 +311,6 @@ def _query_fw02() -> str:
     """
 
 
-def _query_fw03() -> str:
-    """
-    SQL fiel à estrutura do bigquery_03.odt:
-      Progresso dos pacientes — 1 linha por participant × jornada ativa.
-      Colunas: data_entrada, patient_id, jornada (GAD/PHQ), ultima_sessao.
-    Usa views curadas para evitar re-parse do JSON bruto.
-    """
-    return f"""
-    SELECT
-      DATE(p.created_at)                                          AS data_entrada,
-      p.participant_master_id                                     AS patient_id,
-      CASE
-        WHEN j.journey_id = 'GAD'        THEN 'GAD'
-        WHEN j.journey_id = 'DEPRESSION' THEN 'PHQ'
-        ELSE j.journey_id
-      END                                                         AS jornada,
-      j.last_session_number                                       AS ultima_sessao
-    FROM `conemo-412202.firestore_curated.cur_participant_current_v1` p
-    JOIN `conemo-412202.firestore_curated.cur_journey_current_v1` j
-      ON j.participant_master_id = p.participant_master_id
-    WHERE p.created_at >= TIMESTAMP('{DASHBOARD_CUTOFF_TS}')
-      AND (p.is_test_record IS NOT TRUE)
-      AND j.journey_status = 'ACTIVE'
-    ORDER BY data_entrada ASC, p.participant_master_id, jornada
-    """
-
-
-def _query_fw03_sessions() -> str:
-    """
-    Sessões individuais para os gráficos da aba 03.
-    Granularidade: 1 linha por participant × jornada × session_number.
-    Colunas: data_entrada, jornada, session_number, is_completed.
-    """
-    return f"""
-    SELECT
-      DATE(p.created_at)                                          AS data_entrada,
-      CASE
-        WHEN s.journey_id = 'GAD'        THEN 'GAD'
-        WHEN s.journey_id = 'DEPRESSION' THEN 'PHQ'
-        ELSE s.journey_id
-      END                                                         AS jornada,
-      s.session_number,
-      s.is_completed
-    FROM `conemo-412202.firestore_curated.cur_participant_current_v1` p
-    JOIN `conemo-412202.firestore_curated.cur_session_current_v1` s
-      ON s.participant_master_id = p.participant_master_id
-    WHERE p.created_at >= TIMESTAMP('{DASHBOARD_CUTOFF_TS}')
-      AND (p.is_test_record IS NOT TRUE)
-      AND s.session_number IS NOT NULL
-      AND s.journey_id IN ('GAD', 'DEPRESSION')
-    ORDER BY data_entrada ASC, jornada, s.session_number
-    """
-
-
 def _fetch(query: str) -> pd.DataFrame:
     return _get_bq_client().query(query).to_dataframe()
 
@@ -433,99 +366,6 @@ def load_fw01() -> pd.DataFrame:
 def load_fw02() -> pd.DataFrame:
     try:
         return _fetch(_query_fw02())
-    except Exception:
-        return pd.DataFrame()
-
-
-@st.cache_data(ttl=900)
-def load_fw03() -> pd.DataFrame:
-    try:
-        return _fetch(_query_fw03())
-    except Exception:
-        return pd.DataFrame()
-
-
-@st.cache_data(ttl=900)
-def load_fw03_sessions() -> pd.DataFrame:
-    try:
-        return _fetch(_query_fw03_sessions())
-    except Exception:
-        return pd.DataFrame()
-
-
-def _query_fw04() -> str:
-    """
-    SQL fiel à estrutura do bigquery_04.odt — duas lacunas de dados:
-      Caso A: pacientes com jornada ativa que NÃO completaram o formulário web.
-      Caso B: pacientes que completaram o formulário web mas NÃO têm jornada ativa.
-    Um LEFT JOIN cobre ambos; a coluna completou_form permite separar no Python.
-    """
-    return f"""
-    WITH cte_users_base AS (
-      SELECT
-        document_id,
-        JSON_EXTRACT(DATA, '$.organization')    AS organization,
-        JSON_QUERY(DATA,  '$.forms')            AS forms_json,
-        COALESCE(SAFE_CAST(JSON_VALUE(DATA, '$.isTestUser') AS BOOL), FALSE) AS is_test_user,
-        COALESCE(SAFE_CAST(JSON_VALUE(DATA, '$.isTest')     AS BOOL), FALSE) AS is_test,
-        JSON_VALUE(DATA, '$.invalid')           AS is_invalid_raw,
-        TIMESTAMP_MICROS(
-          COALESCE(
-            SAFE_CAST(JSON_VALUE(DATA, '$.createdAt._seconds') AS INT64),
-            SAFE_CAST(JSON_VALUE(DATA, '$.createdAt.seconds')  AS INT64)
-          ) * 1000000
-          + DIV(COALESCE(
-            SAFE_CAST(JSON_VALUE(DATA, '$.createdAt._nanoseconds') AS INT64),
-            SAFE_CAST(JSON_VALUE(DATA, '$.createdAt.nanos')        AS INT64),
-            0
-          ), 1000)
-        ) AS created_at_ts
-      FROM `conemo-412202.firestore_export.users_raw_latest`
-    ),
-    cte_users AS (
-      SELECT
-        document_id                                                     AS user_id,
-        DATE(created_at_ts)                                             AS data_cadastro,
-        COALESCE(JSON_VALUE(organization, '$.name'), 'Não informado')   AS ubs,
-        JSON_VALUE(forms_json, '$[0].status')                           AS first_form_status
-      FROM cte_users_base
-      WHERE created_at_ts >= TIMESTAMP('{DASHBOARD_CUTOFF_TS}')
-        AND is_test_user IS FALSE
-        AND is_test      IS FALSE
-        AND (is_invalid_raw IS NULL OR is_invalid_raw = 'false')
-    ),
-    cte_jornadas AS (
-      SELECT
-        REGEXP_EXTRACT(document_name, r'/' || 'users' || r'/([^/]+)/') AS user_id
-      FROM `conemo-412202.firestore_export.journeys_raw_latest`
-      WHERE COALESCE(SAFE_CAST(JSON_VALUE(DATA, '$.enabled') AS BOOL), FALSE) IS TRUE
-      GROUP BY user_id
-    )
-    SELECT
-      u.user_id                                                         AS patient_id,
-      u.data_cadastro,
-      u.ubs,
-      CASE WHEN u.first_form_status IS NOT NULL AND u.first_form_status != ''
-           THEN 'Sim' ELSE 'Não'
-      END                                                               AS completou_form,
-      CASE WHEN j.user_id IS NOT NULL THEN 'Sim' ELSE 'Não'
-      END                                                               AS tem_jornada
-    FROM cte_users u
-    LEFT JOIN cte_jornadas j ON j.user_id = u.user_id
-    WHERE
-        (j.user_id IS NOT NULL
-            AND (u.first_form_status IS NULL OR u.first_form_status = ''))
-      OR
-        (j.user_id IS NULL
-            AND u.first_form_status IS NOT NULL AND u.first_form_status != '')
-    ORDER BY completou_form ASC, u.data_cadastro ASC
-    """
-
-
-@st.cache_data(ttl=900)
-def load_fw04() -> pd.DataFrame:
-    try:
-        return _fetch(_query_fw04())
     except Exception:
         return pd.DataFrame()
 
@@ -826,6 +666,169 @@ def _ubs_tab_perfil(df_users: pd.DataFrame, dff: pd.DataFrame) -> None:
     _ubs_exportacoes_pendentes()
 
 
+def _ubs_tab_analise_testes(df_users: pd.DataFrame) -> None:
+    PHQ_ORDEM = ["Moderada", "Moderadamente grave", "Grave"]
+    GAD_ORDEM = ["Moderada", "Grave"]
+
+    df = df_users.copy()
+    df["phq_nivel"] = df["phq_score"].apply(phq_severity)
+    df["gad_nivel"] = df["gad_score"].apply(gad_severity)
+
+    df_phq = df[df["phq_nivel"].isin(PHQ_ORDEM)].copy()
+    df_gad = df[df["gad_nivel"].isin(GAD_ORDEM)].copy()
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.subheader("PHQ-9 — Distribuição por severidade")
+        if df_phq.empty:
+            st.info("Nenhum participante com PHQ-9 Moderado ou superior.")
+        else:
+            contagem_phq = (df_phq.groupby(["phq_nivel", "ubs_name"])
+                            .size().reset_index(name="Participantes")
+                            .rename(columns={"phq_nivel": "Nível", "ubs_name": "UBS"}))
+            total_phq = (contagem_phq.groupby("Nível")["Participantes"]
+                         .sum().reindex(PHQ_ORDEM, fill_value=0).reset_index())
+            fig_phq = px.bar(
+                total_phq, x="Nível", y="Participantes",
+                color="Nível",
+                color_discrete_map={
+                    "Moderada":             "#FFA15A",
+                    "Moderadamente grave":  "#EF553B",
+                    "Grave":                "#B22222",
+                },
+                text="Participantes",
+                category_orders={"Nível": PHQ_ORDEM},
+            )
+            fig_phq.update_traces(textposition="outside")
+            fig_phq.update_layout(showlegend=False, height=360, xaxis_title="", yaxis_title="Participantes")
+            st.plotly_chart(fig_phq, width="stretch")
+
+            with st.expander("Ver distribuição por UBS — PHQ-9", expanded=False):
+                pivot_phq = (contagem_phq.pivot_table(
+                    index="UBS", columns="Nível", values="Participantes", fill_value=0)
+                    .reindex(columns=PHQ_ORDEM, fill_value=0))
+                st.dataframe(pivot_phq, use_container_width=True)
+            st.caption("⚠️ Exportação para uso interno autorizado. Dashboard NÃO OPERACIONAL.")
+            _download("⬇️ CSV — PHQ-9 por severidade", total_phq, "phq9_severidade.csv", "dl_phq_sev")
+
+    with col2:
+        st.subheader("GAD-7 — Distribuição por severidade")
+        if df_gad.empty:
+            st.info("Nenhum participante com GAD-7 Moderado ou superior.")
+        else:
+            contagem_gad = (df_gad.groupby(["gad_nivel", "ubs_name"])
+                            .size().reset_index(name="Participantes")
+                            .rename(columns={"gad_nivel": "Nível", "ubs_name": "UBS"}))
+            total_gad = (contagem_gad.groupby("Nível")["Participantes"]
+                         .sum().reindex(GAD_ORDEM, fill_value=0).reset_index())
+            fig_gad = px.bar(
+                total_gad, x="Nível", y="Participantes",
+                color="Nível",
+                color_discrete_map={
+                    "Moderada": "#636EFA",
+                    "Grave":    "#1B2FA0",
+                },
+                text="Participantes",
+                category_orders={"Nível": GAD_ORDEM},
+            )
+            fig_gad.update_traces(textposition="outside")
+            fig_gad.update_layout(showlegend=False, height=360, xaxis_title="", yaxis_title="Participantes")
+            st.plotly_chart(fig_gad, width="stretch")
+
+            with st.expander("Ver distribuição por UBS — GAD-7", expanded=False):
+                pivot_gad = (contagem_gad.pivot_table(
+                    index="UBS", columns="Nível", values="Participantes", fill_value=0)
+                    .reindex(columns=GAD_ORDEM, fill_value=0))
+                st.dataframe(pivot_gad, use_container_width=True)
+            st.caption("⚠️ Exportação para uso interno autorizado. Dashboard NÃO OPERACIONAL.")
+            _download("⬇️ CSV — GAD-7 por severidade", total_gad, "gad7_severidade.csv", "dl_gad_sev")
+
+    st.divider()
+    st.subheader("Resumo combinado — casos Moderados e acima")
+    n_phq = df_phq["user_id"].nunique()
+    n_gad = df_gad["user_id"].nunique()
+    total = df_users["user_id"].nunique()
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Total de participantes", total)
+    c2.metric("PHQ-9 ≥ Moderado", n_phq, f"{n_phq/total*100:.0f}%" if total else "—")
+    c3.metric("GAD-7 ≥ Moderado", n_gad, f"{n_gad/total*100:.0f}%" if total else "—")
+
+    # ── Análise por UBS ────────────────────────────────────────────────────────
+    st.divider()
+    st.subheader("Análise por UBS")
+
+    ubs_opcoes = sorted(df["ubs_name"].dropna().unique().tolist())
+    ubs_sel = st.selectbox("Selecione a UBS", ubs_opcoes, key="analise_testes_ubs_sel")
+
+    df_ubs = df[df["ubs_name"] == ubs_sel]
+    df_ubs_phq = df_ubs[df_ubs["phq_nivel"].isin(PHQ_ORDEM)]
+    df_ubs_gad = df_ubs[df_ubs["gad_nivel"].isin(GAD_ORDEM)]
+
+    total_ubs = df_ubs["user_id"].nunique()
+    n_ubs_phq = df_ubs_phq["user_id"].nunique()
+    n_ubs_gad = df_ubs_gad["user_id"].nunique()
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Participantes na UBS", total_ubs)
+    m2.metric("PHQ-9 ≥ Moderado", n_ubs_phq, f"{n_ubs_phq/total_ubs*100:.0f}%" if total_ubs else "—")
+    m3.metric("GAD-7 ≥ Moderado", n_ubs_gad, f"{n_ubs_gad/total_ubs*100:.0f}%" if total_ubs else "—")
+
+    col_u1, col_u2 = st.columns(2)
+
+    with col_u1:
+        st.markdown(f"**PHQ-9 — {ubs_sel}**")
+        if df_ubs_phq.empty:
+            st.info("Nenhum participante com PHQ-9 Moderado ou superior nesta UBS.")
+        else:
+            total_ubs_phq = (df_ubs_phq.groupby("phq_nivel").size()
+                             .reindex(PHQ_ORDEM, fill_value=0)
+                             .reset_index(name="Participantes")
+                             .rename(columns={"phq_nivel": "Nível"}))
+            fig_u_phq = px.bar(
+                total_ubs_phq, x="Nível", y="Participantes",
+                color="Nível",
+                color_discrete_map={
+                    "Moderada":             "#FFA15A",
+                    "Moderadamente grave":  "#EF553B",
+                    "Grave":                "#B22222",
+                },
+                text="Participantes",
+                category_orders={"Nível": PHQ_ORDEM},
+            )
+            fig_u_phq.update_traces(textposition="outside")
+            fig_u_phq.update_layout(showlegend=False, height=340, xaxis_title="", yaxis_title="Participantes")
+            st.plotly_chart(fig_u_phq, width="stretch")
+            st.caption("⚠️ Exportação para uso interno autorizado. Dashboard NÃO OPERACIONAL.")
+            _download("⬇️ CSV — PHQ-9 por severidade (UBS)", total_ubs_phq,
+                      f"phq9_severidade_{ubs_sel}.csv", "dl_phq_sev_ubs")
+
+    with col_u2:
+        st.markdown(f"**GAD-7 — {ubs_sel}**")
+        if df_ubs_gad.empty:
+            st.info("Nenhum participante com GAD-7 Moderado ou superior nesta UBS.")
+        else:
+            total_ubs_gad = (df_ubs_gad.groupby("gad_nivel").size()
+                             .reindex(GAD_ORDEM, fill_value=0)
+                             .reset_index(name="Participantes")
+                             .rename(columns={"gad_nivel": "Nível"}))
+            fig_u_gad = px.bar(
+                total_ubs_gad, x="Nível", y="Participantes",
+                color="Nível",
+                color_discrete_map={
+                    "Moderada": "#636EFA",
+                    "Grave":    "#1B2FA0",
+                },
+                text="Participantes",
+                category_orders={"Nível": GAD_ORDEM},
+            )
+            fig_u_gad.update_traces(textposition="outside")
+            fig_u_gad.update_layout(showlegend=False, height=340, xaxis_title="", yaxis_title="Participantes")
+            st.plotly_chart(fig_u_gad, width="stretch")
+            st.caption("⚠️ Exportação para uso interno autorizado. Dashboard NÃO OPERACIONAL.")
+            _download("⬇️ CSV — GAD-7 por severidade (UBS)", total_ubs_gad,
+                      f"gad7_severidade_{ubs_sel}.csv", "dl_gad_sev_ubs")
+
+
 def _ubs_exportacoes_pendentes() -> None:
     with st.expander("📤 Exportações pendentes de fonte canônica (E.7-C.3)", expanded=False):
         st.info("Exportação preservada. Conteúdo pendente de fonte canônica validada.")
@@ -878,11 +881,13 @@ def render_estatisticas_ubs(df_all, df_main, df_nao, df_users) -> None:
     _ubs_metricas(dfu, dff)
     st.divider()
 
-    tab_a, tab_b = st.tabs(["📈 Indicadores por UBS", "👥 Perfil e completude"])
+    tab_a, tab_b, tab_c = st.tabs(["📈 Indicadores por UBS", "👥 Perfil e completude", "🧪 Análise Teste (PHQ-9 - GAD-7)"])
     with tab_a:
         _ubs_tab_indicadores(dfu, dff)
     with tab_b:
         _ubs_tab_perfil(dfu, dff)
+    with tab_c:
+        _ubs_tab_analise_testes(dfu)
 
 
 # =============================================================================
@@ -974,291 +979,12 @@ def _fw_export_resumo(df: pd.DataFrame) -> pd.DataFrame:
             }))
 
 
-_FW03_COLORS = {"GAD": "#636EFA", "PHQ": "#EF553B"}
-
-
-def _fw03_graficos(df_prog: pd.DataFrame) -> None:
-    """
-    Gráficos da aba 03 — todos derivados de df_prog (ultima_sessao = $.lastSession
-    da jornada), que reflete onde cada paciente realmente está.
-    df_sess não é usado aqui: o Firestore pré-cria documentos para todas as
-    sessões, tornando qualquer contagem por session_number uniformemente constante.
-    """
-    st.markdown("### Gráficos")
-
-    df_v = df_prog.dropna(subset=["ultima_sessao"]).copy()
-    df_v["ultima_sessao"] = df_v["ultima_sessao"].astype(int)
-
-    col_a, col_b = st.columns(2)
-
-    # ── Gráfico 1: dispersão data de entrada × última sessão ──────────────────
-    with col_a:
-        fig_scatter = px.scatter(
-            df_v,
-            x="data_entrada",
-            y="ultima_sessao",
-            color="jornada",
-            color_discrete_map=_FW03_COLORS,
-            labels={
-                "data_entrada": "Data de Entrada",
-                "ultima_sessao": "Última Sessão",
-                "jornada": "Jornada",
-            },
-            title="Progresso por Data de Entrada",
-        )
-        fig_scatter.update_layout(
-            height=380,
-            xaxis_title="Data de Entrada",
-            yaxis_title="Última Sessão",
-            yaxis=dict(dtick=1),
-            legend_title_text="Jornada",
-        )
-        fig_scatter.update_traces(marker=dict(size=7, opacity=0.7))
-        st.plotly_chart(fig_scatter, use_container_width=True)
-
-    # ── Gráfico 2: distribuição — quantos pacientes têm cada última sessão ─────
-    # Fonte: ultima_sessao de df_prog (field $.lastSession da jornada no Firestore)
-    with col_b:
-        contagem = (
-            df_v.groupby(["jornada", "ultima_sessao"])
-            ["patient_id"].nunique()
-            .reset_index(name="pacientes")
-        )
-        fig_bar = px.bar(
-            contagem,
-            x="ultima_sessao",
-            y="pacientes",
-            color="jornada",
-            barmode="group",
-            color_discrete_map=_FW03_COLORS,
-            labels={
-                "ultima_sessao": "Última Sessão",
-                "pacientes": "Pacientes",
-                "jornada": "Jornada",
-            },
-            title="Distribuição por Última Sessão",
-        )
-        fig_bar.update_layout(
-            height=380,
-            xaxis=dict(dtick=1, title="Última Sessão"),
-            yaxis_title="Pacientes",
-            legend_title_text="Jornada",
-        )
-        st.plotly_chart(fig_bar, use_container_width=True)
-
-    # ── Gráfico 3: curva de retenção — pacientes com ultima_sessao ≥ N ─────────
-    max_sess = int(df_v["ultima_sessao"].max()) if not df_v.empty else 0
-    if max_sess > 0:
-        retencao = []
-        for jornada, grp in df_v.groupby("jornada"):
-            for n in range(1, max_sess + 1):
-                cnt = int((grp["ultima_sessao"] >= n).sum())
-                retencao.append({"Jornada": jornada, "Sessão": n, "Pacientes": cnt})
-        fig_ret = px.line(
-            pd.DataFrame(retencao),
-            x="Sessão",
-            y="Pacientes",
-            color="Jornada",
-            markers=True,
-            color_discrete_map=_FW03_COLORS,
-            title="Retenção — Pacientes que Atingiram pelo Menos N Sessões",
-        )
-        fig_ret.update_layout(
-            height=350,
-            xaxis=dict(dtick=1, title="Número da Sessão"),
-            yaxis_title="Pacientes",
-            legend_title_text="Jornada",
-        )
-        st.plotly_chart(fig_ret, use_container_width=True)
-
-
-def render_fw03(df: pd.DataFrame) -> None:
-    """Renderiza aba 03 — progresso dos pacientes por jornada ativa."""
-    total_pacientes = df["patient_id"].nunique()
-    total_jornadas = len(df)
-    sessao_media = df["ultima_sessao"].mean()
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Total de Pacientes", total_pacientes)
-    c2.metric("Total de Jornadas Ativas", total_jornadas)
-    c3.metric("Sessão Média", f"{sessao_media:.1f}" if total_jornadas else "—")
-    st.markdown("---")
-    _fw03_graficos(df)
-    st.markdown("---")
-    dfv = df.copy()
-    dfv["patient_id_masked"] = dfv["patient_id"].astype(str).str.slice(0, 6) + "…"
-    cols = {
-        "data_entrada":      "Data de Entrada",
-        "patient_id_masked": "ID do Paciente",
-        "jornada":           "Jornada",
-        "ultima_sessao":     "Última Sessão",
-    }
-    st.dataframe(
-        dfv.rename(columns=cols)[list(cols.values())],
-        use_container_width=True,
-        hide_index=False,
-    )
-    st.caption(f"{total_jornadas} jornada(s) ativa(s) de {total_pacientes} paciente(s).")
-    st.markdown("---")
-    st.caption("Exportação na Beta: apenas resumo agregado (sem IDs por paciente).")
-    resumo = (
-        df.groupby("jornada")
-        .agg(
-            Pacientes=("patient_id", "nunique"),
-            Sessao_media=("ultima_sessao", "mean"),
-            Sessao_max=("ultima_sessao", "max"),
-        )
-        .reset_index()
-        .rename(columns={"jornada": "Jornada"})
-    )
-    _download("⬇️ Exportar CSV (agregado)", resumo, "fw03_progresso_resumo.csv", "fw03_download_agg")
-
-
-_FW04_COLORS = {
-    "Sem formulário web": "#FFA15A",
-    "Sem jornada ativa":  "#AB63FA",
-}
-
-
-def _fw04_graficos(df: pd.DataFrame) -> None:
-    """Gráficos da aba 04: lacunas por mês de entrada e por UBS."""
-    df_plot = df.copy()
-    df_plot["Lacuna"] = df_plot["completou_form"].map(
-        {"Não": "Sem formulário web"}
-    ).fillna("Sem jornada ativa")
-    df_plot["data_cadastro"] = pd.to_datetime(df_plot["data_cadastro"], errors="coerce")
-    df_plot["mes"] = df_plot["data_cadastro"].dt.to_period("M").astype(str)
-
-    col_a, col_b = st.columns(2)
-
-    # ── Gráfico 1: lacunas por mês de entrada ─────────────────────────────────
-    with col_a:
-        temporal = (
-            df_plot.groupby(["mes", "Lacuna"])["patient_id"]
-            .nunique()
-            .reset_index(name="Pacientes")
-            .sort_values("mes")
-        )
-        fig1 = px.bar(
-            temporal,
-            x="mes",
-            y="Pacientes",
-            color="Lacuna",
-            barmode="group",
-            color_discrete_map=_FW04_COLORS,
-            labels={"mes": "Mês", "Pacientes": "Pacientes", "Lacuna": "Lacuna"},
-            title="Lacunas por Mês de Entrada",
-        )
-        fig1.update_layout(
-            height=380,
-            xaxis_title="Mês",
-            yaxis_title="Pacientes",
-            xaxis_tickangle=-30,
-            legend_title_text="Lacuna",
-        )
-        st.plotly_chart(fig1, use_container_width=True)
-
-    # ── Gráfico 2: lacunas por UBS ─────────────────────────────────────────────
-    with col_b:
-        por_ubs = (
-            df_plot.groupby(["ubs", "Lacuna"])["patient_id"]
-            .nunique()
-            .reset_index(name="Pacientes")
-        )
-        ordem_ubs = (
-            por_ubs.groupby("ubs")["Pacientes"].sum()
-            .sort_values(ascending=False)
-            .index.tolist()
-        )
-        fig2 = px.bar(
-            por_ubs,
-            x="ubs",
-            y="Pacientes",
-            color="Lacuna",
-            barmode="group",
-            color_discrete_map=_FW04_COLORS,
-            category_orders={"ubs": ordem_ubs},
-            labels={"ubs": "UBS", "Pacientes": "Pacientes", "Lacuna": "Lacuna"},
-            title="Lacunas por UBS",
-        )
-        fig2.update_layout(
-            height=380,
-            xaxis_title="UBS",
-            yaxis_title="Pacientes",
-            xaxis_tickangle=-30,
-            legend_title_text="Lacuna",
-        )
-        st.plotly_chart(fig2, use_container_width=True)
-
-
-def render_fw04(df: pd.DataFrame) -> None:
-    """Renderiza aba 04 — lacunas: sem form e sem jornada."""
-    df_sem_form    = df[df["completou_form"] == "Não"].copy()
-    df_sem_jornada = df[df["tem_jornada"]   == "Não"].copy()
-
-    c1, c2 = st.columns(2)
-    c1.metric("Sem formulário web (com jornada)", len(df_sem_form))
-    c2.metric("Sem jornada ativa (com formulário)", len(df_sem_jornada))
-    st.markdown("---")
-    _fw04_graficos(df)
-    st.markdown("---")
-
-    col_a, col_b = st.columns(2)
-
-    with col_a:
-        st.markdown("**Pacientes que não completaram o formulário web**")
-        dfv = df_sem_form.copy()
-        dfv["patient_id_masked"] = dfv["patient_id"].astype(str).str.slice(0, 6) + "…"
-        st.dataframe(
-            dfv.rename(columns={
-                "data_cadastro":     "Data de Entrada",
-                "patient_id_masked": "ID do Paciente",
-            })[["Data de Entrada", "ID do Paciente"]],
-            use_container_width=True,
-            hide_index=False,
-        )
-        st.caption(f"{len(df_sem_form)} paciente(s)")
-        resumo_a = (
-            df_sem_form.groupby("data_cadastro")["patient_id"]
-            .nunique()
-            .reset_index(name="Pacientes")
-            .rename(columns={"data_cadastro": "Data_Entrada"})
-        )
-        _download("⬇️ Exportar CSV (agregado por data)", resumo_a,
-                  "fw04_sem_form.csv", "fw04a_dl")
-
-    with col_b:
-        st.markdown("**Pacientes que completaram o form Web mas não têm jornadas**")
-        dfv2 = df_sem_jornada.copy()
-        dfv2["patient_id_masked"] = dfv2["patient_id"].astype(str).str.slice(0, 6) + "…"
-        st.dataframe(
-            dfv2.rename(columns={
-                "data_cadastro":     "Data de Entrada",
-                "patient_id_masked": "ID do Paciente",
-                "ubs":               "UBS",
-            })[["Data de Entrada", "ID do Paciente", "UBS"]],
-            use_container_width=True,
-            hide_index=False,
-        )
-        st.caption(f"{len(df_sem_jornada)} paciente(s)")
-        resumo_b = (
-            df_sem_jornada.groupby("ubs")["patient_id"]
-            .nunique()
-            .reset_index(name="Pacientes")
-            .rename(columns={"ubs": "UBS"})
-            .sort_values("Pacientes", ascending=False)
-        )
-        _download("⬇️ Exportar CSV (agregado por UBS)", resumo_b,
-                  "fw04_sem_jornada.csv", "fw04b_dl")
-
-
 def render_formulario_web() -> None:
-    """Página Formulário Web — quatro abas: fw01/02/03/04."""
+    """Página Formulário Web — duas abas: fw01 (bigquery_01) e fw02 (bigquery_02)."""
     st.title("📋 Formulário Web")
-    tab1, tab2, tab3, tab4 = st.tabs([
+    tab1, tab2 = st.tabs([
         "📊 Todos com Jornadas",
         "✅ Completaram Form App",
-        "📈 Progresso dos Pacientes",
-        "⚠️ Lacunas de Dados",
     ])
     with tab1:
         st.subheader("Pacientes com Jornadas Habilitadas")
@@ -1276,22 +1002,6 @@ def render_formulario_web() -> None:
             st.warning("Nenhum dado disponível. Verifique a conexão com o BigQuery.")
         else:
             render_fw02(df2)
-    with tab3:
-        st.subheader("Progresso dos Pacientes por Jornada Ativa")
-        with st.spinner("Carregando dados do BigQuery..."):
-            df3 = load_fw03()
-        if df3.empty:
-            st.warning("Nenhum dado disponível. Verifique a conexão com o BigQuery.")
-        else:
-            render_fw03(df3)
-    with tab4:
-        st.subheader("Lacunas de Dados — Formulário e Jornadas")
-        with st.spinner("Carregando dados do BigQuery..."):
-            df4 = load_fw04()
-        if df4.empty:
-            st.warning("Nenhum dado disponível. Verifique a conexão com o BigQuery.")
-        else:
-            render_fw04(df4)
 
 
 # =============================================================================
