@@ -666,6 +666,172 @@ def _ubs_tab_perfil(df_users: pd.DataFrame, dff: pd.DataFrame) -> None:
     _ubs_exportacoes_pendentes()
 
 
+def _ubs_tab_analise_testes(df_users: pd.DataFrame) -> None:
+    PHQ_ORDEM = ["Moderada", "Moderadamente grave", "Grave"]
+    GAD_ORDEM = ["Moderada", "Grave"]
+
+    df = df_users.copy()
+    df["phq_nivel"] = df["phq_score"].apply(phq_severity)
+    df["gad_nivel"] = df["gad_score"].apply(gad_severity)
+
+    df_phq = df[df["phq_nivel"].isin(PHQ_ORDEM)].copy()
+    df_gad = df[df["gad_nivel"].isin(GAD_ORDEM)].copy()
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.subheader("PHQ-9 — Distribuição por severidade")
+        if df_phq.empty:
+            st.info("Nenhum participante com PHQ-9 Moderado ou superior.")
+        else:
+            contagem_phq = (df_phq.groupby(["phq_nivel", "ubs_name"])
+                            .size().reset_index(name="Participantes")
+                            .rename(columns={"phq_nivel": "Nível", "ubs_name": "UBS"}))
+            total_phq = (contagem_phq.groupby("Nível")["Participantes"]
+                         .sum().reindex(PHQ_ORDEM, fill_value=0).reset_index())
+            fig_phq = px.bar(
+                total_phq, x="Nível", y="Participantes",
+                color="Nível",
+                color_discrete_map={
+                    "Moderada":             "#FFA15A",
+                    "Moderadamente grave":  "#EF553B",
+                    "Grave":                "#B22222",
+                },
+                text="Participantes",
+                category_orders={"Nível": PHQ_ORDEM},
+            )
+            fig_phq.update_traces(textposition="outside")
+            fig_phq.update_layout(showlegend=False, height=360, xaxis_title="", yaxis_title="Participantes")
+            st.plotly_chart(fig_phq, width="stretch")
+
+            with st.expander("Ver distribuição por UBS — PHQ-9", expanded=False):
+                pivot_phq = (contagem_phq.pivot_table(
+                    index="UBS", columns="Nível", values="Participantes", fill_value=0)
+                    .reindex(columns=PHQ_ORDEM, fill_value=0))
+                st.dataframe(pivot_phq, use_container_width=True)
+            st.caption("⚠️ Exportação para uso interno autorizado. Dashboard NÃO OPERACIONAL.")
+            _download("⬇️ CSV — PHQ-9 por severidade", total_phq, "phq9_severidade.csv", "dl_phq_sev")
+
+    with col2:
+        st.subheader("GAD-7 — Distribuição por severidade")
+        if df_gad.empty:
+            st.info("Nenhum participante com GAD-7 Moderado ou superior.")
+        else:
+            contagem_gad = (df_gad.groupby(["gad_nivel", "ubs_name"])
+                            .size().reset_index(name="Participantes")
+                            .rename(columns={"gad_nivel": "Nível", "ubs_name": "UBS"}))
+            total_gad = (contagem_gad.groupby("Nível")["Participantes"]
+                         .sum().reindex(GAD_ORDEM, fill_value=0).reset_index())
+            fig_gad = px.bar(
+                total_gad, x="Nível", y="Participantes",
+                color="Nível",
+                color_discrete_map={
+                    "Moderada": "#636EFA",
+                    "Grave":    "#1B2FA0",
+                },
+                text="Participantes",
+                category_orders={"Nível": GAD_ORDEM},
+            )
+            fig_gad.update_traces(textposition="outside")
+            fig_gad.update_layout(showlegend=False, height=360, xaxis_title="", yaxis_title="Participantes")
+            st.plotly_chart(fig_gad, width="stretch")
+
+            with st.expander("Ver distribuição por UBS — GAD-7", expanded=False):
+                pivot_gad = (contagem_gad.pivot_table(
+                    index="UBS", columns="Nível", values="Participantes", fill_value=0)
+                    .reindex(columns=GAD_ORDEM, fill_value=0))
+                st.dataframe(pivot_gad, use_container_width=True)
+            st.caption("⚠️ Exportação para uso interno autorizado. Dashboard NÃO OPERACIONAL.")
+            _download("⬇️ CSV — GAD-7 por severidade", total_gad, "gad7_severidade.csv", "dl_gad_sev")
+
+    st.divider()
+    st.subheader("Resumo combinado — casos Moderados e acima")
+    n_phq = df_phq["user_id"].nunique()
+    n_gad = df_gad["user_id"].nunique()
+    total = df_users["user_id"].nunique()
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Total de participantes", total)
+    c2.metric("PHQ-9 ≥ Moderado", n_phq, f"{n_phq/total*100:.0f}%" if total else "—")
+    c3.metric("GAD-7 ≥ Moderado", n_gad, f"{n_gad/total*100:.0f}%" if total else "—")
+
+    # ── Análise por UBS ────────────────────────────────────────────────────────
+    st.divider()
+    st.subheader("Análise por UBS")
+
+    ubs_opcoes = sorted(df["ubs_name"].dropna().unique().tolist())
+    if not ubs_opcoes:
+        st.info("Nenhuma UBS disponível para análise dos testes PHQ-9 e GAD-7.")
+        return
+    ubs_sel = st.selectbox("Selecione a UBS", ubs_opcoes, key="analise_testes_ubs_sel")
+
+    df_ubs = df[df["ubs_name"] == ubs_sel]
+    df_ubs_phq = df_ubs[df_ubs["phq_nivel"].isin(PHQ_ORDEM)]
+    df_ubs_gad = df_ubs[df_ubs["gad_nivel"].isin(GAD_ORDEM)]
+
+    total_ubs = df_ubs["user_id"].nunique()
+    n_ubs_phq = df_ubs_phq["user_id"].nunique()
+    n_ubs_gad = df_ubs_gad["user_id"].nunique()
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Participantes na UBS", total_ubs)
+    m2.metric("PHQ-9 ≥ Moderado", n_ubs_phq, f"{n_ubs_phq/total_ubs*100:.0f}%" if total_ubs else "—")
+    m3.metric("GAD-7 ≥ Moderado", n_ubs_gad, f"{n_ubs_gad/total_ubs*100:.0f}%" if total_ubs else "—")
+
+    col_u1, col_u2 = st.columns(2)
+
+    with col_u1:
+        st.markdown(f"**PHQ-9 — {ubs_sel}**")
+        if df_ubs_phq.empty:
+            st.info("Nenhum participante com PHQ-9 Moderado ou superior nesta UBS.")
+        else:
+            total_ubs_phq = (df_ubs_phq.groupby("phq_nivel").size()
+                             .reindex(PHQ_ORDEM, fill_value=0)
+                             .reset_index(name="Participantes")
+                             .rename(columns={"phq_nivel": "Nível"}))
+            fig_u_phq = px.bar(
+                total_ubs_phq, x="Nível", y="Participantes",
+                color="Nível",
+                color_discrete_map={
+                    "Moderada":             "#FFA15A",
+                    "Moderadamente grave":  "#EF553B",
+                    "Grave":                "#B22222",
+                },
+                text="Participantes",
+                category_orders={"Nível": PHQ_ORDEM},
+            )
+            fig_u_phq.update_traces(textposition="outside")
+            fig_u_phq.update_layout(showlegend=False, height=340, xaxis_title="", yaxis_title="Participantes")
+            st.plotly_chart(fig_u_phq, width="stretch")
+            st.caption("⚠️ Exportação para uso interno autorizado. Dashboard NÃO OPERACIONAL.")
+            _download("⬇️ CSV — PHQ-9 por severidade (UBS)", total_ubs_phq,
+                      f"phq9_severidade_{ubs_sel}.csv", "dl_phq_sev_ubs")
+
+    with col_u2:
+        st.markdown(f"**GAD-7 — {ubs_sel}**")
+        if df_ubs_gad.empty:
+            st.info("Nenhum participante com GAD-7 Moderado ou superior nesta UBS.")
+        else:
+            total_ubs_gad = (df_ubs_gad.groupby("gad_nivel").size()
+                             .reindex(GAD_ORDEM, fill_value=0)
+                             .reset_index(name="Participantes")
+                             .rename(columns={"gad_nivel": "Nível"}))
+            fig_u_gad = px.bar(
+                total_ubs_gad, x="Nível", y="Participantes",
+                color="Nível",
+                color_discrete_map={
+                    "Moderada": "#636EFA",
+                    "Grave":    "#1B2FA0",
+                },
+                text="Participantes",
+                category_orders={"Nível": GAD_ORDEM},
+            )
+            fig_u_gad.update_traces(textposition="outside")
+            fig_u_gad.update_layout(showlegend=False, height=340, xaxis_title="", yaxis_title="Participantes")
+            st.plotly_chart(fig_u_gad, width="stretch")
+            st.caption("⚠️ Exportação para uso interno autorizado. Dashboard NÃO OPERACIONAL.")
+            _download("⬇️ CSV — GAD-7 por severidade (UBS)", total_ubs_gad,
+                      f"gad7_severidade_{ubs_sel}.csv", "dl_gad_sev_ubs")
+
+
 def _ubs_exportacoes_pendentes() -> None:
     with st.expander("📤 Exportações pendentes de fonte canônica (E.7-C.3)", expanded=False):
         st.info("Exportação preservada. Conteúdo pendente de fonte canônica validada.")
@@ -718,11 +884,13 @@ def render_estatisticas_ubs(df_all, df_main, df_nao, df_users) -> None:
     _ubs_metricas(dfu, dff)
     st.divider()
 
-    tab_a, tab_b = st.tabs(["📈 Indicadores por UBS", "👥 Perfil e completude"])
+    tab_a, tab_b, tab_c = st.tabs(["📈 Indicadores por UBS", "👥 Perfil e completude", "🧪 Análise dos testes PHQ-9 e GAD-7"])
     with tab_a:
         _ubs_tab_indicadores(dfu, dff)
     with tab_b:
         _ubs_tab_perfil(dfu, dff)
+    with tab_c:
+        _ubs_tab_analise_testes(dfu)
 
 
 # =============================================================================
