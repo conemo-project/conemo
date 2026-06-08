@@ -759,6 +759,9 @@ def _ubs_tab_analise_testes(df_users: pd.DataFrame) -> None:
     st.subheader("Análise por UBS")
 
     ubs_opcoes = sorted(df["ubs_name"].dropna().unique().tolist())
+    if not ubs_opcoes:
+        st.info("Nenhuma UBS disponível para análise dos testes PHQ-9 e GAD-7.")
+        return
     ubs_sel = st.selectbox("Selecione a UBS", ubs_opcoes, key="analise_testes_ubs_sel")
 
     df_ubs = df[df["ubs_name"] == ubs_sel]
@@ -881,7 +884,7 @@ def render_estatisticas_ubs(df_all, df_main, df_nao, df_users) -> None:
     _ubs_metricas(dfu, dff)
     st.divider()
 
-    tab_a, tab_b, tab_c = st.tabs(["📈 Indicadores por UBS", "👥 Perfil e completude", "🧪 Análise Teste (PHQ-9 - GAD-7)"])
+    tab_a, tab_b, tab_c = st.tabs(["📈 Indicadores por UBS", "👥 Perfil e completude", "🧪 Análise dos testes PHQ-9 e GAD-7"])
     with tab_a:
         _ubs_tab_indicadores(dfu, dff)
     with tab_b:
